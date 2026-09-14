@@ -1,0 +1,22 @@
+# Internal planning docs — contain real cleaner names, pay rates, and
+# contract dates. Never publish these; kept local-only on purpose.
+سند-معماری-سیستم-مهمانخانه.md
+نظافتچی_ها-و-فرمول_های-مالی.md
+
+# Secrets
+.env
+
+# Real reservation data (never commit real guest data)
+GästeListe_*.xlsx
+reservations.xlsx
+!sample_data/*.xlsx
+backups/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Excel lock files
+~$*.xlsx

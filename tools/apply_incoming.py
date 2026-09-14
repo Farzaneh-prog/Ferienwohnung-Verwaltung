@@ -125,8 +125,18 @@ def append_reservation(ws, header_map, entry):
     set_field("confirmation_code", entry.get("confirmation_code"))
     if entry.get("guest_email"):
         set_field("guest_email", entry["guest_email"])
-    if entry.get("paid_amount") is not None:
-        set_field("paid", entry["paid_amount"])
+    # "Gezahlt" = what the guest paid in total. Prefer the unambiguous
+    # guest_paid_total (from the platform's own payout breakdown); the older
+    # generic paid_amount is kept as a fallback for entries sent before this
+    # field existed, but it was found to sometimes actually be the host
+    # payout (after platform fees), not the guest total — see cowork-command.md.
+    guest_paid = entry.get("guest_paid_total")
+    if guest_paid is None:
+        guest_paid = entry.get("paid_amount")
+    if guest_paid is not None:
+        set_field("paid", guest_paid)
+    if entry.get("cleaning_fee_charged") is not None:
+        set_field("cleaning_fee_charged", entry["cleaning_fee_charged"])
 
     # Structural formula columns (I, J) — safe because this is a brand new
     # row referencing only its own cells; no other row is touched.

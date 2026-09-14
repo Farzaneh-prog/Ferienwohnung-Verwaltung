@@ -29,6 +29,7 @@ FIELD_HEADERS = {
     "tourist_tax": "Übernachtungssteuer",
     "paid": "Gezahlt",
     "cleaning_cost": "Putzarbeit",
+    "cleaning_fee_charged": "Endreinigung",
     "earned": "Verdient",
     "foreign_company": "Ausländische Firma mit steuer in Heimat",
     "invoice_number": "Rechnungsnummer",

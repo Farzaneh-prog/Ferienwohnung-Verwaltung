@@ -35,6 +35,8 @@ FIELD_HEADERS = {
     "confirmation_code": "Bestätigungs-Code",
     "transferred": "bereits überweist",
     "earned_per_night": "Verdient pro nacht (für mich)",
+    "guest_email": "Email von Kunde",
+    "cancelled": "Storniert",
 }
 
 

@@ -17,6 +17,8 @@
     tr:hover { background: #1c2f57; }
     .empty { padding: 2rem; text-align: center; color: #9fb0cf; }
     .count { color: #9fb0cf; font-size: 0.85rem; margin-bottom: 0.75rem; }
+    tr.cancelled { opacity: 0.45; }
+    .badge { display: inline-block; padding: 0.1rem 0.5rem; border-radius: 999px; font-size: 0.75rem; background: #4a1f2b; color: #ffb4c2; margin-left: 0.4rem; }
   </style>
 </head>
 <body>
@@ -38,6 +40,7 @@
     <thead>
       <tr>
         <th>Gast</th>
+        <th>E-Mail</th>
         <th>Plattform</th>
         <th>Anreise</th>
         <th>Abreise</th>
@@ -50,8 +53,9 @@
     </thead>
     <tbody>
       {% for r in reservations %}
-      <tr>
-        <td>{{ r.guest_name or '' }}</td>
+      <tr class="{{ 'cancelled' if r.cancelled == 'ja' else '' }}">
+        <td>{{ r.guest_name or '' }}{% if r.cancelled == 'ja' %}<span class="badge">storniert</span>{% endif %}</td>
+        <td>{{ r.guest_email or '' }}</td>
         <td>{{ r.platform or '' }}</td>
         <td>{{ r.checkin or '' }}</td>
         <td>{{ r.checkout or '' }}</td>

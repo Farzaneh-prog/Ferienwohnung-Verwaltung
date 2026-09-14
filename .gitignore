@@ -20,3 +20,4 @@ venv/
 
 # Excel lock files
 ~$*.xlsx
+wordpress-plugin/marktresidenz-secrets.php

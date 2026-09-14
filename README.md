@@ -71,6 +71,48 @@ sich wieder langsam anfühlt, dasselbe Skript erneut laufen lassen (Anleitung im
 Skript-Docstring). Backups der Originaldateien vor dem Schrumpfen liegen in
 `backups/` (gitignored, nicht versioniert).
 
+## Phase 2 — Cowork-Einlese-Pipeline (2026-09-14)
+
+Cowork (Cloud-Automatisierung, läuft unabhängig vom eigenen Rechner) prüft täglich
+Airbnb/Booking/Vrbo und schreibt alles, was es findet, an einen kleinen, isolierten
+Eingangs-Briefkasten auf **marktresidenz-eisenach.de** selbst (nicht auf ein
+fremdes Cloud-Konto) — siehe `wordpress-plugin/marktresidenz-incoming-api.php`.
+Zwei getrennte Schlüssel (Schreiben für Cowork, Lesen für das lokale Skript;
+in `.env`/`wp-content/mu-plugins/marktresidenz-secrets.php`, nie im Repo) sorgen
+dafür, dass ein geleakter Schreib-Schlüssel höchstens Datenmüll erzeugen könnte,
+aber niemals Gästedaten auslesen kann.
+
+`tools/apply_incoming.py` holt die wartenden Einträge ab und überträgt sie sicher
+in die echten Excel-Dateien:
+- **Neue Reservierungen** werden nur an eine bereits leere Zeile im richtigen
+  Quartals-Sheet **angehängt**, nie mittendrin eingefügt — `openpyxl` passt beim
+  Einfügen/Löschen von Zeilen die Formel-Bezüge anderer Zeilen NICHT automatisch
+  an (anders als Excel selbst), ein Insert/Delete mitten im Sheet würde also
+  bestehende Formeln stillschweigend kaputt machen. Nur Excel selbst darf Zeilen
+  wirklich löschen (macht das automatisch richtig).
+- **Stornierungen** werden nie gelöscht, sondern nur mit dem neuen Flag-Feld
+  `Storniert` (Spalte BB) markiert (`ja`) — Zuordnung über den
+  `Bestätigungs-Code`. So bleiben Formeln unberührt und ein zukünftiges
+  Reinigungs-Modul kann stornierte Zeilen einfach überspringen, ohne dass sie
+  optisch/inhaltlich wie eine normale Buchung aussehen (frühere Idee, den
+  Gästenamen umzubenennen, wurde verworfen — das würde mit der Zeilenzuordnung
+  fürs Putzpersonal kollidieren). Manuelles Löschen dieser Zeilen durch dich
+  selbst in Excel bleibt jederzeit sicher möglich.
+- Jede berührte Datei wird vor dem Schreiben automatisch nach `backups/`
+  gesichert; ein Eintrag wird erst nach erfolgreichem Schreiben als erledigt
+  markiert (`/incoming/{id}/ack`) — ein Absturz mitten im Lauf führt einfach zu
+  einem Retry beim nächsten Aufruf, nichts geht doppelt oder verloren.
+
+**openpyxl-Falle (gefunden 2026-09-14):** `ws.cell(row, col, value=None)`
+schreibt NICHTS — `None` ist der Sentinel-Wert für "kein Wert übergeben", die
+Zelle bleibt unverändert. Zum Leeren einer Zelle immer `cell.value = None`
+direkt setzen, nie über das `value=`-Keyword-Argument.
+
+Welche Felder Cowork mitschicken soll (inkl. E-Mail und den vom Portal selbst
+sichtbaren Finanzfeldern wie Zahlbetrag/Reinigungsgebühr/Plattformgebühr) —
+bewusst großzügig ("alles was sichtbar ist"), die Zuordnung/Auswahl passiert
+erst in `apply_incoming.py`, nichts wird geraten.
+
 ## Struktur
 
 ```
@@ -81,13 +123,16 @@ app/
   excel_reader.py   Liest Reservierungen aus allen 4 Quartals-Sheets
   routes.py         /login, /logout, /reservations
   templates/        login.html, reservations.html
+tools/
+  shrink_xlsx.py       Entfernt Formatierungs-Ballast (siehe oben)
+  apply_incoming.py    Holt Cowork-Daten ab, schreibt sicher in die echten Dateien
 sample_data/        Fake-Demo-Dateien (Struktur wie echte Dateien)
+wordpress-plugin/    Eingangs-Briefkasten-Plugin für marktresidenz-eisenach.de
 ```
 
 ## Nächste Phasen (laut Architektur-Dokument)
 
-2. Cowork-Task zum automatischen Einlesen neuer Reservierungen
 3. Finanzmodul (vollständige Formeln S–BE)
 4. Automatische Gäste-E-Mails (Steuererinnerung, Schlüsselcode)
-5. WhatsApp-Koordination der Putzkräfte (Twilio)
+5. WhatsApp-Koordination der Putzkräfte (Twilio) — nutzt das `Storniert`-Flag
 6. GitHub-Veröffentlichung (Screenshots, finaler Cleanup)

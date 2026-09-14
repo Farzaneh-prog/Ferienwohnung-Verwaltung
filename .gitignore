@@ -21,3 +21,7 @@ venv/
 # Excel lock files
 ~$*.xlsx
 wordpress-plugin/marktresidenz-secrets.php
+
+# Real platform account/listing identifiers — operational business info,
+# not published alongside the generic template in docs/cowork-command.md
+docs/cowork-command.local.md

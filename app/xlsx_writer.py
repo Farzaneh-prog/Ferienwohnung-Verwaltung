@@ -66,9 +66,23 @@ EXPLICIT_FORMULAS = {
         'über die Plattform Vrbo.", "Bitte überweisen Sie den Gesamtbetrag von "&'
         'TEXT(AE{r},"0.00")&" € binnen 14 Tagen auf das unten genannte Bankkonto."))))'
     ),
+    # U (bezahlt zum putzfrau) — placeholder default, see EXPLICIT_LITERALS
+    # comment below; real value once the actual cleaner/hours are known.
+    "U": "=T{r}*12",
 }
-# AG (Stellplatz) is always a plain 0, not a formula.
-EXPLICIT_LITERALS = {"AG": 0}
+# AG (Stellplatz) = 0 is a permanent constant (never has a value in the
+# real data). S/T/V are PLACEHOLDER defaults, not real values — Farzaneh
+# (2026-09-16): fill these now so the row isn't blank, then replace with
+# the actual figures once cleaning has happened, based on the (future)
+# cleaning schedule / cleaner table (Phase 5). V='M-Ü' mirrors the
+# cleaner-code short-labels already used in the real data (e.g. 'Jen-Ü',
+# 'Meh-Ü') — a specific default cleaner code, not a generic placeholder.
+EXPLICIT_LITERALS = {
+    "AG": 0,
+    "S": 0,      # selbstfahren zum putzen
+    "T": 3.5,    # Putzstunden
+    "V": "M-Ü",  # cleaner code
+}
 
 
 def set_explicit_cells(ws, row, log=print):

@@ -19,6 +19,7 @@ import re
 import shutil
 
 import openpyxl
+from openpyxl.utils import get_column_letter
 
 from .config import PROPERTY_FILES, PROPERTY_FILE_YEAR, FUTURE_YEAR_SHEET, DATA_DIR
 from .excel_reader import FIELD_HEADERS, _build_header_map
@@ -173,20 +174,40 @@ def append_reservation(ws, header_map, entry, log=print):
     if entry.get("guest_email"):
         set_field("guest_email", entry["guest_email"])
 
-    # "Gezahlt" = what the guest paid in total. Prefer the unambiguous
-    # guest_paid_total (from the platform's own breakdown); the older
-    # generic paid_amount is kept as a fallback for entries sent before this
-    # field existed, but it was found to sometimes actually be the host
-    # payout (after platform fees), not the guest total.
+    # "Gezahlt" (O) = Preis + Übernachtungssteuer (M) — confirmed by
+    # Farzaneh 2026-09-16 against the real Booking.com 'detailed' export
+    # ('Price' column) and the sheet's own M column. Written as a formula
+    # referencing M{row} (not a second literal) so it stays correct if M
+    # is edited later.
     guest_paid = entry.get("guest_paid_total")
     if guest_paid is None:
-        guest_paid = entry.get("paid_amount")
+        guest_paid = entry.get("paid_amount")  # fallback for older Cowork-queue entries
     if guest_paid is not None:
-        set_field("paid", guest_paid)
+        tourist_tax_col = header_map.get(FIELD_HEADERS["tourist_tax"])
+        if tourist_tax_col is not None:
+            m_letter = get_column_letter(tourist_tax_col + 1)
+            set_field("paid", f"={guest_paid}+{m_letter}{row}")
+        else:
+            set_field("paid", guest_paid)
+
     if entry.get("cleaning_fee_charged") is not None:
         set_field("cleaning_fee_charged", entry["cleaning_fee_charged"])
-    if entry.get("platform_fee_total") is not None:
-        set_field("platform_commission", entry["platform_fee_total"])
+
+    # AA (Nettobetrag) = the Booking.com 'detailed' export's pure Commission
+    # amount. AX (Payment Charge von Booking) = the 'simple' export's
+    # Commission (which combines that SAME commission with an extra payment
+    # -processing fee) minus AA — isolating just the payment-processing
+    # portion, which is what AX's name actually means. Both come from
+    # Booking.com specifically; only written when we actually have the
+    # matching figure(s) — never guessed, and not applied to Airbnb entries
+    # (their fee breakdown means something different — see
+    # docs/cowork-command.md history).
+    commission_pure = entry.get("platform_fee_total")   # detailed export
+    commission_combined = entry.get("platform_fee_combined")  # simple export
+    if commission_pure is not None:
+        set_field("nettobetrag", commission_pure)
+    if commission_pure is not None and commission_combined is not None:
+        set_field("platform_commission", round(commission_combined - commission_pure, 2))
 
     # Structural formula columns (I, J) — no header text, so set_field can't
     # reach them; safe regardless of template_row because they only ever

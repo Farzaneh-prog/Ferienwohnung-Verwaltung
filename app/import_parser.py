@@ -95,7 +95,11 @@ def parse_booking_simple(path):
             "children": None,
             "confirmation_code": code,
             "guest_paid_total": _parse_money(row.get("Total payment")),
-            "platform_fee_total": _parse_money(row.get("Commission")),
+            # "Commission" here is the COMBINED figure (commission + payment
+            # processing fee) — confirmed by Farzaneh against the detailed
+            # export's pure "Commission amount" for the same booking; kept
+            # separate on purpose, see xlsx_writer.append_reservation.
+            "platform_fee_combined": _parse_money(row.get("Commission")),
             "source_file": "booking_simple",
         })
     return reservations, cancellations
@@ -135,6 +139,9 @@ def parse_booking_detailed(path):
             "children": int(children) if isinstance(children, (int, float)) else 0,
             "confirmation_code": code,
             "guest_paid_total": _parse_money(row.get("Price")),
+            # The PURE platform commission (unlike booking_simple's combined
+            # "Commission", which also folds in a payment-processing fee) —
+            # goes to Nettobetrag/AA. See xlsx_writer.append_reservation.
             "platform_fee_total": _parse_money(row.get("Commission amount")),
             "extra": {
                 "commission_percent": row.get("Commission %"),
@@ -213,6 +220,30 @@ def parse_airbnb_csv(path):
             "source_file": "airbnb_csv",
         })
     return reservations, []  # Airbnb export has no cancellation status column
+
+
+def merge_reservation_entries(entries):
+    """Field-level merge of multiple parsed entries for the same
+    confirmation code — e.g. the same Booking.com reservation appears in
+    both the 'simple' and 'detailed' exports, each with different real
+    numbers (Commission vs. Commission amount are NOT the same figure).
+    Picking one file over the other would silently drop real data, so this
+    merges field-by-field: first non-empty value wins, except guest_name
+    prefers a real name over a placeholder wherever it appears."""
+    merged = {}
+    for e in entries:
+        for k, v in e.items():
+            if k == "extra":
+                merged.setdefault("extra", {}).update(v or {})
+                continue
+            if v in (None, ""):
+                continue
+            current = merged.get(k)
+            if current in (None, ""):
+                merged[k] = v
+            elif k == "guest_name" and is_placeholder_name(current) and not is_placeholder_name(v):
+                merged[k] = v
+    return merged
 
 
 def detect_and_parse(path, filename):

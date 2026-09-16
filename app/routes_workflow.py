@@ -13,7 +13,7 @@ from flask import Blueprint, render_template, request, redirect, url_for, flash
 from .auth import login_required
 from .config import PROPERTY_LABELS, PROPERTY_FILES, DATA_DIR
 from .excel_reader import get_existing_confirmation_codes, find_incomplete_reservations
-from .import_parser import detect_and_parse
+from .import_parser import detect_and_parse, merge_reservation_entries
 from .quick_alerts import list_alerts, add_alert, resolve_alert
 from .xlsx_writer import process_batch, update_reservation_fields
 
@@ -21,19 +21,6 @@ bp = Blueprint("workflow", __name__)
 
 STAGING_DIR = os.path.join(DATA_DIR, "data", "import_staging")
 UPLOAD_DIR = os.path.join(DATA_DIR, "data", "uploads")
-
-
-def _richness(entry):
-    """Higher = more complete, used to pick the best candidate when the same
-    confirmation code shows up in more than one uploaded file."""
-    score = 0
-    if not str(entry.get("guest_name", "")).startswith("Gast (Code"):
-        score += 2
-    if entry.get("adults") is not None:
-        score += 1
-    if entry.get("guest_email"):
-        score += 1
-    return score
 
 
 # ---------------------------------------------------------------- import ---
@@ -54,7 +41,7 @@ def import_preview():
         return redirect(url_for("workflow.import_form"))
 
     os.makedirs(UPLOAD_DIR, exist_ok=True)
-    all_reservations = {}  # confirmation_code -> best entry
+    entries_by_code = {}  # confirmation_code -> list of entries (one per file it appeared in)
     all_cancellations = []
     errors = []
     file_summaries = []
@@ -69,10 +56,14 @@ def import_preview():
             continue
         file_summaries.append({"filename": f.filename, "kind": kind, "count": len(res) + len(can)})
         for r in res:
-            code = r["confirmation_code"]
-            if code not in all_reservations or _richness(r) > _richness(all_reservations[code]):
-                all_reservations[code] = r
+            entries_by_code.setdefault(r["confirmation_code"], []).append(r)
         all_cancellations.extend(can)
+
+    # Same booking in more than one uploaded file (e.g. Booking.com's
+    # 'simple' and 'detailed' exports) — merge field-by-field rather than
+    # picking one, since they carry different real numbers (see
+    # xlsx_writer.append_reservation for how AA/AX get combined from them).
+    all_reservations = {code: merge_reservation_entries(es) for code, es in entries_by_code.items()}
 
     existing_codes = {}
     to_add, duplicates = [], []

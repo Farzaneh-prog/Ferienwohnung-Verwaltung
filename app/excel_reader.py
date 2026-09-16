@@ -39,6 +39,7 @@ FIELD_HEADERS = {
     "guest_email": "Email von Kunde",
     "cancelled": "Storniert",
     "platform_commission": "Payment Charge von Booking",
+    "nettobetrag": "Nettobetrag",
 }
 
 

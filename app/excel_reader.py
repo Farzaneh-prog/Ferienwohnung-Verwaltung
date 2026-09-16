@@ -40,6 +40,7 @@ FIELD_HEADERS = {
     "cancelled": "Storniert",
     "platform_commission": "Payment Charge von Booking",
     "nettobetrag": "Nettobetrag",
+    "vat_rate": "Umsatzsteuersatz",
 }
 
 

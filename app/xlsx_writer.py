@@ -30,6 +30,14 @@ COL_J_CHILD_NIGHTS = 10   # =H*F
 
 WEEKDAYS_DE = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"]
 
+# Business-rule constants confirmed by Farzaneh 2026-09-16 — not derived
+# from any export, just fixed defaults she gave directly.
+DEFAULT_VAT_RATE = 0.19  # Z / Umsatzsteuersatz — always 19%
+# P / Putzarbeit (paid to the cleaner) — fixed rate per property, but only
+# for Booking.com reservations; no rule given for Airbnb/Vrbo, so those
+# stay blank rather than guessed.
+CLEANING_COST_BOOKING = {"karlstrasse": 50, "eisenach": 65}
+
 # How many columns wide a row can be (A..BH ~ 60) — used when scanning a
 # template row for formulas to clone.
 MAX_COLUMN = 62
@@ -173,6 +181,16 @@ def append_reservation(ws, header_map, entry, log=print):
     set_field("confirmation_code", entry.get("confirmation_code"))
     if entry.get("guest_email"):
         set_field("guest_email", entry["guest_email"])
+
+    # M (Übernachtungssteuer) is always Erwachsene × Nächte.
+    set_field("tourist_tax", f"=G{row}*F{row}")
+    # Z (Umsatzsteuersatz) is always 19%.
+    set_field("vat_rate", DEFAULT_VAT_RATE)
+    # P (Putzarbeit) — fixed per-property rate, Booking.com reservations only.
+    if str(entry.get("platform", "")).strip().lower() == "booking":
+        cleaning_cost = CLEANING_COST_BOOKING.get(entry.get("property"))
+        if cleaning_cost is not None:
+            set_field("cleaning_cost", cleaning_cost)
 
     # "Gezahlt" (O) = Preis + Übernachtungssteuer (M) — confirmed by
     # Farzaneh 2026-09-16 against the real Booking.com 'detailed' export

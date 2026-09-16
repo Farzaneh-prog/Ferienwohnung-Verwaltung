@@ -19,7 +19,7 @@ import re
 import shutil
 
 import openpyxl
-from openpyxl.utils import get_column_letter
+from openpyxl.utils import get_column_letter, column_index_from_string
 
 from .config import PROPERTY_FILES, PROPERTY_FILE_YEAR, FUTURE_YEAR_SHEET, DATA_DIR
 from .excel_reader import FIELD_HEADERS, _build_header_map
@@ -37,6 +37,48 @@ DEFAULT_VAT_RATE = 0.19  # Z / Umsatzsteuersatz — always 19%
 # for Booking.com reservations; no rule given for Airbnb/Vrbo, so those
 # stay blank rather than guessed.
 CLEANING_COST_BOOKING = {"karlstrasse": 50, "eisenach": 65}
+
+# Canonical formulas confirmed directly by Farzaneh (2026-09-16), addressed
+# by their fixed real column LETTER rather than FIELD_HEADERS — R and AQ
+# both happen to share the exact same header text ("Ausländische Firma mit
+# steuer in Heimat"), so a name-based lookup can't tell them apart; these
+# letters were verified against the real files repeatedly this session and
+# have been stable. Applied AFTER clone_formulas, deliberately overriding
+# whatever got cloned: several historical rows had these as one-off
+# hardcoded/pasted numbers rather than live formulas (e.g. AF was a plain
+# manual value in every example row checked), so blind cloning would have
+# propagated a stale number instead of the real formula.
+# {r} is substituted with the new row's own number.
+EXPLICIT_FORMULAS = {
+    "AK": '=IF(AQ{r}="ja",AJ{r},AJ{r}/1.07)',
+    "AL": "=AK{r}*1.07",
+    "AM": "=AJ{r}",
+    "BC": "=AF{r}+AH{r}+AN{r}+AO{r}+AP{r}-AE{r}+AG{r}",
+    "AV": (
+        '=IF(B{r}="Airbnb","Ein Teil der Zahlung wird voraussichtlich einen Tag nach Ihrem '
+        'Check-in über die Plattform Airbnb erfolgen. Bitte überweisen Sie die '
+        'Tourismusförderabgabe separat auf das unten genannte Bankkonto.",'
+        'IF(B{r}="booking","Ein Teil der Zahlung wird voraussichtlich einen Tag nach Ihrem '
+        'Aufenthalt über die Plattform Booking.com erfolgen. Bitte überweisen Sie die '
+        'Tourismusförderabgabe separat auf das unten genannte Bankkonto.", '
+        'IF(AW{r}="ja","Die Zahlung für diese Unterkunft ist bereits erfolgt.",'
+        'IF(B{r}="Vrbo","Die Zahlung erfolgt voraussichtlich zehn Tage nach Ihrem Aufenthalt '
+        'über die Plattform Vrbo.", "Bitte überweisen Sie den Gesamtbetrag von "&'
+        'TEXT(AE{r},"0.00")&" € binnen 14 Tagen auf das unten genannte Bankkonto."))))'
+    ),
+}
+# AG (Stellplatz) is always a plain 0, not a formula.
+EXPLICIT_LITERALS = {"AG": 0}
+
+
+def set_explicit_cells(ws, row, log=print):
+    for letter, template in EXPLICIT_FORMULAS.items():
+        col = column_index_from_string(letter)
+        ws.cell(row=row, column=col).value = template.format(r=row)
+    for letter, value in EXPLICIT_LITERALS.items():
+        col = column_index_from_string(letter)
+        ws.cell(row=row, column=col).value = value
+    log(f"    set {len(EXPLICIT_FORMULAS)} explicit formulas + {len(EXPLICIT_LITERALS)} literal(s) on row {row}")
 
 # How many columns wide a row can be (A..BH ~ 60) — used when scanning a
 # template row for formulas to clone.
@@ -208,8 +250,15 @@ def append_reservation(ws, header_map, entry, log=print):
         else:
             set_field("paid", guest_paid)
 
+    # AF (Endreinigung — cleaning fee charged to the GUEST, distinct from P
+    # /Putzarbeit paid TO the cleaner). Airbnb's export gives this directly
+    # (verified against a real 'Einkünfte' screenshot) — use it as-is. For
+    # Booking.com we don't have a direct figure, so fall back to Farzaneh's
+    # formula (2026-09-16): P/1.07, or P itself for a foreign company (R).
     if entry.get("cleaning_fee_charged") is not None:
         set_field("cleaning_fee_charged", entry["cleaning_fee_charged"])
+    else:
+        set_field("cleaning_fee_charged", f'=IF(R{row}="ja",P{row},P{row}/1.07)')
 
     # AA (Nettobetrag) = the Booking.com 'detailed' export's pure Commission
     # amount. AX (Payment Charge von Booking) = the 'simple' export's
@@ -232,6 +281,8 @@ def append_reservation(ws, header_map, entry, log=print):
     # reference their own row.
     ws.cell(row=row, column=COL_I_ADULT_NIGHTS, value=f"=F{row}*G{row}")
     ws.cell(row=row, column=COL_J_CHILD_NIGHTS, value=f"=H{row}*F{row}")
+
+    set_explicit_cells(ws, row, log=log)
 
     log(f"    appended row {row}: {entry.get('guest_name')} ({entry['checkin']} -> {entry['checkout']})")
     return row

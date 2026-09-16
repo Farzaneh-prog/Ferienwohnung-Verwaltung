@@ -228,11 +228,16 @@ def append_reservation(ws, header_map, entry, log=print):
     set_field("tourist_tax", f"=G{row}*F{row}")
     # Z (Umsatzsteuersatz) is always 19%.
     set_field("vat_rate", DEFAULT_VAT_RATE)
-    # P (Putzarbeit) — fixed per-property rate, Booking.com reservations only.
+    # P (Putzarbeit): fixed per-property rate for Booking.com; for Airbnb,
+    # its own export's Reinigungsgebühr goes here instead (confirmed by
+    # Farzaneh 2026-09-16 — same field she'd previously called
+    # cleaning_fee_charged, but it belongs in P, not AF, for Airbnb).
     if str(entry.get("platform", "")).strip().lower() == "booking":
         cleaning_cost = CLEANING_COST_BOOKING.get(entry.get("property"))
-        if cleaning_cost is not None:
-            set_field("cleaning_cost", cleaning_cost)
+    else:
+        cleaning_cost = entry.get("cleaning_fee_charged")
+    if cleaning_cost is not None:
+        set_field("cleaning_cost", cleaning_cost)
 
     # "Gezahlt" (O) = Preis + Übernachtungssteuer (M) — confirmed by
     # Farzaneh 2026-09-16 against the real Booking.com 'detailed' export
@@ -251,14 +256,11 @@ def append_reservation(ws, header_map, entry, log=print):
             set_field("paid", guest_paid)
 
     # AF (Endreinigung — cleaning fee charged to the GUEST, distinct from P
-    # /Putzarbeit paid TO the cleaner). Airbnb's export gives this directly
-    # (verified against a real 'Einkünfte' screenshot) — use it as-is. For
-    # Booking.com we don't have a direct figure, so fall back to Farzaneh's
-    # formula (2026-09-16): P/1.07, or P itself for a foreign company (R).
-    if entry.get("cleaning_fee_charged") is not None:
-        set_field("cleaning_fee_charged", entry["cleaning_fee_charged"])
-    else:
-        set_field("cleaning_fee_charged", f'=IF(R{row}="ja",P{row},P{row}/1.07)')
+    # /Putzarbeit paid TO the cleaner) = IF(R='ja', P, P/1.07), always, for
+    # every platform (confirmed by Farzaneh 2026-09-16 — same formula
+    # applies whether P came from a fixed Booking.com rate or Airbnb's own
+    # Reinigungsgebühr). Set unconditionally, referencing P{row} directly.
+    set_field("cleaning_fee_charged", f'=IF(R{row}="ja",P{row},P{row}/1.07)')
 
     # AA (Nettobetrag) = the Booking.com 'detailed' export's pure Commission
     # amount. AX (Payment Charge von Booking) = the 'simple' export's

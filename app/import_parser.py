@@ -82,11 +82,13 @@ def parse_booking_simple(path):
             continue
         arrival = datetime.datetime.strptime(row["Arrival"], "%d %B %Y").date()
         departure = datetime.datetime.strptime(row["Departure"], "%d %B %Y").date()
-        guest_name = str(row.get("Booker name", "")).strip() or guest_placeholder(code)
+        # "Booker name" deliberately ignored (Farzaneh's call — not the field
+        # she trusts/uses; only "Guest name(s)" from the detailed Booking.com
+        # export and "Gast" from Airbnb count as a real guest name source).
         reservations.append({
             "property": property_key,
             "platform": "booking",
-            "guest_name": guest_name,
+            "guest_name": guest_placeholder(code),
             "checkin": arrival.isoformat(),
             "checkout": departure.isoformat(),
             "adults": None,

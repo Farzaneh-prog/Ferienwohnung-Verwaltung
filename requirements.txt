@@ -3,3 +3,4 @@ openpyxl==3.1.5
 python-dotenv==1.0.1
 Werkzeug==3.0.4
 requests==2.32.3
+xlrd==1.2.0

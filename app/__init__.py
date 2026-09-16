@@ -11,6 +11,8 @@ def create_app():
     app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-only-insecure-key")
 
     from .routes import bp
+    from .routes_workflow import bp as workflow_bp
 
     app.register_blueprint(bp)
+    app.register_blueprint(workflow_bp)
     return app

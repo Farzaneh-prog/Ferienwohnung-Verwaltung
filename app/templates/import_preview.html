@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <title>پیش‌نمایش Import</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #0f2143; color: #f5f4f0; margin: 0; padding: 2rem; }
+    h1 { font-size: 1.3rem; }
+    h2 { font-size: 1rem; color: #f4b400; margin-top: 2rem; }
+    table { width: 100%; border-collapse: collapse; background: #16294f; border-radius: 8px; overflow: hidden; margin-top: 0.5rem; }
+    th, td { padding: 0.4rem 0.6rem; text-align: left; font-size: 0.85rem; border-bottom: 1px solid #24365c; }
+    th { background: #0f2143; }
+    .muted { color: #9fb0cf; font-size: 0.85rem; }
+    .err { color: #ff8a80; }
+    button { padding: 0.6rem 1.2rem; border: none; border-radius: 6px; background: #f4b400; color: #0f2143; font-weight: 600; cursor: pointer; margin-top: 1.5rem; }
+    a.back { color: #f4b400; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <h1>پیش‌نمایش — قبل از اعمال روی فایل اصلی</h1>
+
+  {% if errors %}
+    <h2>خطاها</h2>
+    <ul class="err">{% for e in errors %}<li>{{ e }}</li>{% endfor %}</ul>
+  {% endif %}
+
+  <p class="muted">فایل‌های خونده‌شده: {% for fs in file_summaries %}{{ fs.filename }} ({{ fs.kind }}, {{ fs.count }} ردیف){{ ", " if not loop.last }}{% endfor %}</p>
+
+  <h2>✅ اضافه می‌شن ({{ to_add|length }})</h2>
+  {% if to_add %}
+  <table>
+    <thead><tr><th>ملک</th><th>پلتفرم</th><th>مهمان</th><th>ورود</th><th>خروج</th><th>کد</th><th>مبلغ مهمان</th></tr></thead>
+    <tbody>
+    {% for r in to_add %}
+      <tr>
+        <td>{{ property_labels.get(r.property, r.property) }}</td>
+        <td>{{ r.platform }}</td>
+        <td>{{ r.guest_name }}</td>
+        <td>{{ r.checkin }}</td>
+        <td>{{ r.checkout }}</td>
+        <td>{{ r.confirmation_code }}</td>
+        <td>{{ r.guest_paid_total if r.guest_paid_total is not none else '' }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="muted">هیچی جدید نبود.</p>{% endif %}
+
+  <h2>⏭️ تکراری، رد می‌شن ({{ duplicates|length }})</h2>
+  {% if duplicates %}
+  <table>
+    <thead><tr><th>ملک</th><th>کد</th><th>ورود</th></tr></thead>
+    <tbody>
+    {% for r in duplicates %}
+      <tr><td>{{ property_labels.get(r.property, r.property) }}</td><td>{{ r.confirmation_code }}</td><td>{{ r.checkin }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="muted">هیچی تکراری نبود.</p>{% endif %}
+
+  <h2>🚫 کنسلی‌ها ({{ cancellations|length }})</h2>
+  {% if cancellations %}
+  <table>
+    <thead><tr><th>ملک</th><th>کد</th></tr></thead>
+    <tbody>
+    {% for c in cancellations %}
+      <tr><td>{{ property_labels.get(c.property, c.property) }}</td><td>{{ c.confirmation_code }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="muted">هیچ کنسلی‌ای نبود.</p>{% endif %}
+
+  <form method="post" action="{{ url_for('workflow.import_confirm') }}">
+    <input type="hidden" name="token" value="{{ token }}">
+    <button type="submit">تأیید و اعمال روی فایل اصلی</button>
+  </form>
+  <p><a class="back" href="{{ url_for('workflow.import_form') }}">← بازگشت / آپلود جدید</a></p>
+</body>
+</html>

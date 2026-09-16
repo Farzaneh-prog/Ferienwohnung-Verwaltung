@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <title>Import — Marktresidenz</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #0f2143; color: #f5f4f0; margin: 0; padding: 2rem; }
+    header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; }
+    h1 { font-size: 1.3rem; margin: 0; }
+    nav a { color: #f4b400; text-decoration: none; margin-inline-start: 1rem; font-size: 0.9rem; }
+    .card { background: #16294f; border-radius: 8px; padding: 1.5rem; max-width: 560px; }
+    p { color: #9fb0cf; font-size: 0.9rem; }
+    input[type=file] { display: block; margin: 1rem 0; color: #f5f4f0; }
+    button { padding: 0.6rem 1.2rem; border: none; border-radius: 6px; background: #f4b400; color: #0f2143; font-weight: 600; cursor: pointer; }
+    .flash { background: #4a1f2b; color: #ffb4c2; padding: 0.6rem 1rem; border-radius: 6px; margin-bottom: 1rem; }
+    ul.hint { color: #9fb0cf; font-size: 0.85rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>آپلود فایل رزرو (Booking/Airbnb)</h1>
+    <nav>
+      <a href="{{ url_for('main.reservations') }}">رزروها</a>
+      <a href="{{ url_for('workflow.complete_list') }}">تکمیل اطلاعات</a>
+      <a href="{{ url_for('workflow.alerts_list') }}">هشدار نظافتچی</a>
+    </nav>
+  </header>
+
+  {% for msg in get_flashed_messages() %}
+    <div class="flash">{{ msg }}</div>
+  {% endfor %}
+
+  <div class="card">
+    <p>فایل‌های export شده از Booking.com (ساده یا با جزئیات) و Airbnb (.csv) رو اینجا آپلود کنید — هر ترکیبی، هر چندتا.</p>
+    <ul class="hint">
+      <li>Booking.com: Extranet → Reservations → Export</li>
+      <li>Airbnb: Host → Transaction history / Earnings → Export CSV</li>
+    </ul>
+    <form method="post" enctype="multipart/form-data">
+      <input type="file" name="files" multiple accept=".xls,.csv">
+      <button type="submit">پیش‌نمایش</button>
+    </form>
+  </div>
+</body>
+</html>

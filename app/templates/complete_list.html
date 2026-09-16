@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>تکمیل اطلاعات رزرو</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #0f2143; color: #f5f4f0; margin: 0; padding: 1rem; }
+    h1 { font-size: 1.15rem; }
+    nav a { color: #f4b400; text-decoration: none; font-size: 0.85rem; margin-inline-end: 1rem; }
+    .flash { background: #1c4a2b; color: #b4ffc2; padding: 0.6rem 1rem; border-radius: 6px; margin: 1rem 0; }
+    .card { background: #16294f; border-radius: 10px; padding: 1rem; margin: 0.75rem 0; }
+    .card h3 { margin: 0 0 0.5rem; font-size: 1rem; }
+    .card .meta { color: #9fb0cf; font-size: 0.85rem; margin-bottom: 0.75rem; }
+    .card form { display: grid; gap: 0.5rem; }
+    label { font-size: 0.8rem; color: #9fb0cf; }
+    input { width: 100%; box-sizing: border-box; padding: 0.6rem; border-radius: 6px; border: 1px solid #3a4a6b; background: #0f2143; color: #fff; font-size: 1rem; }
+    .row { display: flex; gap: 0.5rem; }
+    .row > div { flex: 1; }
+    button { padding: 0.6rem 1rem; border: none; border-radius: 6px; background: #f4b400; color: #0f2143; font-weight: 600; cursor: pointer; }
+    .empty { color: #9fb0cf; text-align: center; padding: 2rem; }
+  </style>
+</head>
+<body>
+  <h1>تکمیل اطلاعات رزرو</h1>
+  <nav><a href="{{ url_for('main.reservations') }}">رزروها</a><a href="{{ url_for('workflow.import_form') }}">آپلود</a><a href="{{ url_for('workflow.alerts_list') }}">هشدار نظافتچی</a></nav>
+
+  {% for msg in get_flashed_messages() %}<div class="flash">{{ msg }}</div>{% endfor %}
+
+  {% set total = incomplete.values() | map('length') | sum %}
+  {% if total == 0 %}
+    <p class="empty">چیزی برای تکمیل نیست 🎉</p>
+  {% endif %}
+
+  {% for property_key, rows in incomplete.items() %}
+    {% for r in rows %}
+      <div class="card">
+        <h3>{{ property_labels.get(property_key, property_key) }} — {{ r.platform }}</h3>
+        <div class="meta">{{ r.checkin }} → {{ r.checkout }} · کد: {{ r.confirmation_code }}</div>
+        <form method="post" action="{{ url_for('workflow.complete_submit', property_key=property_key, code=r.confirmation_code) }}">
+          <div>
+            <label>اسم مهمان</label>
+            <input type="text" name="guest_name" placeholder="اسم کامل مهمان">
+          </div>
+          <div>
+            <label>ایمیل مهمان</label>
+            <input type="email" name="guest_email" placeholder="اختیاری">
+          </div>
+          <div class="row">
+            <div>
+              <label>بزرگسال</label>
+              <input type="number" name="adults" min="0">
+            </div>
+            <div>
+              <label>کودک زیر ۱۸</label>
+              <input type="number" name="children" min="0">
+            </div>
+          </div>
+          <button type="submit">ذخیره</button>
+        </form>
+      </div>
+    {% endfor %}
+  {% endfor %}
+</body>
+</html>

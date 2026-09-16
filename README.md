@@ -113,6 +113,56 @@ sichtbaren Finanzfeldern wie Zahlbetrag/Reinigungsgebühr/Plattformgebühr) —
 bewusst großzügig ("alles was sichtbar ist"), die Zuordnung/Auswahl passiert
 erst in `apply_incoming.py`, nichts wird geraten.
 
+## Kurswechsel — manueller Export statt Live-Scraping (2026-09-16)
+
+**Sowohl Airbnb als auch Booking.com verbieten in ihren Nutzungsbedingungen
+ausdrücklich automatisierten/KI-gestützten Zugriff** (Booking.com nennt
+explizit "AI-powered assistants"; Airbnb schließt auch automatisierten
+Zugriff auf den eigenen Account ein) — Konsequenzen reichen bis zur
+Kontosperrung/Vertragskündigung. Der Cowork-Ansatz (oben) wurde deshalb für
+Airbnb/Booking.com **eingestellt**. Statt automatisiertem Scraping/API-Sync
+nutzen wir jetzt die **offiziellen Export-Funktionen** beider Plattformen
+(Booking.com Extranet → Reservations → Export; Airbnb Host → Earnings →
+Export CSV) — das ist ein regulärer, für Kontoinhaber gedachtes Feature,
+kein Scraping, und Farzaneh lädt die Dateien manuell hoch, wann sie will
+(wöchentlich, alle paar Tage, …). `app/import_parser.py` liest beide
+Booking.com-Export-Varianten (einfach/mit Kontaktdetails) sowie Airbnbs
+CSV-Export.
+
+**Wichtige Erkenntnis aus den echten Exportdateien:** Gästename und E-Mail
+sind in **keinem** der drei Formate enthalten — bleibt immer ein manueller
+Schritt (`/complete`, siehe unten). Booking.com "detailed" liefert dafür
+Erwachsene/Kinder sauber; Airbnb nicht. Die Finanzfelder aus Airbnbs Export
+(`Betrag`, `Servicegebühr`, `Reinigungsgebühr`) wurden gegen einen echten
+Screenshot der Airbnb-"Einkünfte"-Aufschlüsselung verifiziert: `Betrag` =
+Auszahlung an den Gastgeber, `Servicegebühr` = Plattformgebühr inkl. MwSt.,
+`guest_paid_total` wird als `Betrag + Servicegebühr` rekonstruiert (exakt
+207,00 € = 168,81 € + 38,19 € im Testfall).
+
+Drei neue Web-Seiten (`/import`, `/complete`, `/alerts`):
+- **`/import`**: Dateien hochladen → Vorschau (neu / bereits vorhanden,
+  dedupliziert über `Bestätigungs-Code` gegen die echten Dateien UND
+  zwischen mehreren hochgeladenen Dateien / dieselbe Reservierung kann in
+  Airbnbs "letzter Monat"- und "nächste 2 Monate"-Export gleichzeitig
+  auftauchen / / Stornierungen über Booking.coms `Status`-Spalte) → erst
+  nach Bestätigen wird geschrieben. Fehlende Felder (Gästename etc.) werden
+  als Platzhalter `Gast (Code <Code>)` gespeichert, nie leer gelassen (eine
+  leere Spalte A würde mit der "erste leere Zeile"-Logik kollidieren, die
+  neue Zeilen in Lücken alter, manuell gelöschter Reservierungen einfügt).
+- **`/complete`**: mobilfreundliche Liste aller Platzhalter-Zeilen zum
+  Nachtragen von Gästename/E-Mail/Personenzahl — kein Computer nötig.
+- **`/alerts`**: bewusst **von der eigentlichen Excel-Tabelle entkoppelte**
+  Mini-Liste ("Ferienwohnung X, Datum Y") für den Fall, dass eine neue
+  Buchung sofort einer Putzkraft gemeldet werden muss, aber die vollständige
+  Dateneingabe erst später (wöchentlich) passiert — landet in
+  `data/quick_alerts.json` (gitignored), nicht in den Excel-Dateien.
+
+Die gemeinsame sichere Schreiblogik (Anhängen statt Einfügen, Backup vor
+jedem Schreiben, Storniert-Flag statt Löschen) wurde aus
+`tools/apply_incoming.py` nach `app/xlsx_writer.py` ausgelagert — beide
+Pfade (Cowork-Warteschlange und manueller Upload) nutzen jetzt exakt
+dieselbe Funktion (`process_batch`).
+
 ## Struktur
 
 ```

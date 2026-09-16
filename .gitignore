@@ -11,6 +11,7 @@ GästeListe_*.xlsx
 reservations.xlsx
 !sample_data/*.xlsx
 backups/
+data/
 
 # Python
 __pycache__/

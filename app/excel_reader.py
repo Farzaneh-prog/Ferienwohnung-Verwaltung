@@ -85,6 +85,26 @@ def _sort_key(reservation):
     return datetime.datetime.max
 
 
+def find_incomplete_reservations(property_key: str) -> list:
+    """Reservations imported via CSV/XLS that still need a manual pass
+    (placeholder guest name — see app/import_parser.py)."""
+    from .import_parser import is_placeholder_name  # local import: avoids a cycle
+
+    return [r for r in load_reservations(property_key) if is_placeholder_name(r.get("guest_name"))]
+
+
+def get_existing_confirmation_codes(property_key: str) -> set:
+    """All confirmation codes already present for a property, normalized to
+    str, for de-duplicating imports (a CSV export can overlap what's already
+    in the sheet — e.g. Airbnb's exports can't be filtered by booking date)."""
+    codes = set()
+    for r in load_reservations(property_key):
+        code = r.get("confirmation_code")
+        if code not in (None, ""):
+            codes.add(str(code).strip())
+    return codes
+
+
 def load_reservations(property_key: str) -> list:
     """Load + merge all quarter sheets for one property, sorted by Anreise Datum."""
     path = resolve_property_path(property_key)

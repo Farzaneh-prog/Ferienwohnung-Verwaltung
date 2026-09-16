@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>هشدار سریع نظافتچی</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #0f2143; color: #f5f4f0; margin: 0; padding: 1rem; }
+    h1 { font-size: 1.15rem; }
+    nav a { color: #f4b400; text-decoration: none; font-size: 0.85rem; margin-inline-end: 1rem; }
+    .add-card { background: #16294f; border-radius: 10px; padding: 1rem; margin: 1rem 0; }
+    .add-card form { display: grid; gap: 0.5rem; }
+    label { font-size: 0.8rem; color: #9fb0cf; }
+    input, select { width: 100%; box-sizing: border-box; padding: 0.6rem; border-radius: 6px; border: 1px solid #3a4a6b; background: #0f2143; color: #fff; font-size: 1rem; }
+    button { padding: 0.6rem 1rem; border: none; border-radius: 6px; background: #f4b400; color: #0f2143; font-weight: 600; cursor: pointer; }
+    .alert-card { background: #16294f; border-radius: 10px; padding: 0.9rem; margin: 0.6rem 0; display: flex; justify-content: space-between; align-items: center; gap: 0.75rem; }
+    .alert-card .info b { display: block; }
+    .alert-card .info span { color: #9fb0cf; font-size: 0.85rem; }
+    .resolve { background: transparent; border: 1px solid #f4b400; color: #f4b400; padding: 0.4rem 0.8rem; border-radius: 6px; font-size: 0.85rem; }
+    .empty { color: #9fb0cf; text-align: center; padding: 1.5rem; }
+  </style>
+</head>
+<body>
+  <h1>هشدار سریع نظافتچی</h1>
+  <nav><a href="{{ url_for('main.reservations') }}">رزروها</a><a href="{{ url_for('workflow.import_form') }}">آپلود</a><a href="{{ url_for('workflow.complete_list') }}">تکمیل اطلاعات</a></nav>
+
+  <div class="add-card">
+    <form method="post" action="{{ url_for('workflow.alerts_add') }}">
+      <div>
+        <label>ملک</label>
+        <select name="property">
+          {% for key, label in property_labels.items() %}
+            <option value="{{ key }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label>تاریخ (ورود یا هر تاریخی که مهمه)</label>
+        <input type="date" name="date" required>
+      </div>
+      <div>
+        <label>یادداشت (اختیاری)</label>
+        <input type="text" name="note" placeholder="مثلاً: بوک جدید، هنوز کامل وارد نشده">
+      </div>
+      <button type="submit">ثبت سریع</button>
+    </form>
+  </div>
+
+  {% if not alerts %}
+    <p class="empty">هیچ هشدار بازی نیست</p>
+  {% endif %}
+  {% for a in alerts %}
+    <div class="alert-card">
+      <div class="info">
+        <b>{{ property_labels.get(a.property, a.property) }} — {{ a.date }}</b>
+        <span>{{ a.note or '—' }}</span>
+      </div>
+      <form method="post" action="{{ url_for('workflow.alerts_resolve', alert_id=a.id) }}">
+        <button class="resolve" type="submit">انجام شد</button>
+      </form>
+    </div>
+  {% endfor %}
+</body>
+</html>

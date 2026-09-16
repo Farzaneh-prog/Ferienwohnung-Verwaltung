@@ -24,7 +24,12 @@
 <body>
   <header>
     <h1>Reservierungen — {{ property_label }}</h1>
-    <a class="logout" href="{{ url_for('main.logout') }}">Abmelden</a>
+    <div>
+      <a class="logout" href="{{ url_for('workflow.import_form') }}">Import</a>
+      <a class="logout" href="{{ url_for('workflow.complete_list') }}">Vervollständigen</a>
+      <a class="logout" href="{{ url_for('workflow.alerts_list') }}">Putz-Alerts</a>
+      <a class="logout" href="{{ url_for('main.logout') }}">Abmelden</a>
+    </div>
   </header>
 
   <div class="tabs">

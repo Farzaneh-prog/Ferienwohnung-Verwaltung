@@ -14,11 +14,13 @@ DATA_DIR = os.environ.get(
 )
 
 # property_key -> filename (relative to DATA_DIR)
-# Update this every year when a new GästeListe file is created.
+# Update this every year when a new GästeListe file is created — PROPERTY_FILE_YEAR
+# too (it's what "belongs in Muster instead of a quarter sheet" is decided against).
 PROPERTY_FILES = {
     "karlstrasse": "GästeListe_2026K.xlsx",
     "eisenach": "GästeListe_2026_Pf.xlsx",
 }
+PROPERTY_FILE_YEAR = 2026
 
 PROPERTY_LABELS = {
     "karlstrasse": "Marktresidenz Karlstraße",
@@ -28,13 +30,19 @@ PROPERTY_LABELS = {
 # Sheets that hold actual reservation rows (one per quarter).
 QUARTER_SHEETS = ["1", "2", "3", "4"]
 
-# Sheets that are summaries/templates, never reservation data — always skipped.
+# "Muster" ("template") is a misleading name — Farzaneh confirmed it's
+# actually where reservations for a *future* year get held (2026-09-16),
+# since the next year's own GästeListe file doesn't exist yet when they're
+# booked. It IS a real data sheet, not a template — must be read like the
+# quarter sheets, not skipped.
+FUTURE_YEAR_SHEET = "Muster"
+
+# Sheets that are summaries, never reservation data — always skipped.
 NON_DATA_SHEETS = {
     "Übersicht",
     "ÜbersichtSteuer",
     "zwischenjährlich",
     "Umsatzsteuer",
-    "Muster",
     "Tabelle3",
 }
 

@@ -15,11 +15,12 @@ Safety rules (see README "Excel-Dateigröße" section and project history):
 """
 import datetime
 import os
+import re
 import shutil
 
 import openpyxl
 
-from .config import PROPERTY_FILES, DATA_DIR
+from .config import PROPERTY_FILES, PROPERTY_FILE_YEAR, FUTURE_YEAR_SHEET, DATA_DIR
 from .excel_reader import FIELD_HEADERS, _build_header_map
 
 # Column indices (1-based) with no header text — structural, not name-addressable.
@@ -28,6 +29,17 @@ COL_J_CHILD_NIGHTS = 10   # =H*F
 
 WEEKDAYS_DE = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"]
 
+# How many columns wide a row can be (A..BH ~ 60) — used when scanning a
+# template row for formulas to clone.
+MAX_COLUMN = 62
+
+
+def format_date_de(d: datetime.date) -> str:
+    """Every existing row stores dates as literal 'DD.MM.YYYY' text (not a
+    real Excel date value) — match that exactly, or new rows visibly stick
+    out and sort/filter differently in Excel."""
+    return d.strftime("%d.%m.%Y")
+
 
 def parse_date(s):
     if isinstance(s, datetime.date):
@@ -35,7 +47,14 @@ def parse_date(s):
     return datetime.datetime.strptime(s, "%Y-%m-%d").date()
 
 
-def quarter_sheet_for(checkin_date) -> str:
+def target_sheet_for(checkin_date) -> str:
+    """Quarter sheet ('1'-'4') for a check-in in the file's own year;
+    'Muster' for any other year — that sheet is not actually a template
+    (misleading name) but where reservations for a year that doesn't have
+    its own GästeListe file yet are held (confirmed with Farzaneh
+    2026-09-16), until moved by hand once that year's file exists."""
+    if checkin_date.year != PROPERTY_FILE_YEAR:
+        return FUTURE_YEAR_SHEET
     return str((checkin_date.month - 1) // 3 + 1)
 
 
@@ -60,7 +79,66 @@ def last_used_row(ws) -> int:
     return row
 
 
+def find_template_row(ws, before_row: int, min_formula_cells=3):
+    """Find the nearest row at or above `before_row` that looks like a fully
+    formed reservation row (has several formula cells), to clone formulas
+    from. Scans upward from before_row down to row 2 first (closest/most
+    recent row wins); if that finds nothing — e.g. the insertion point is
+    early in a sheet with real data only much further down after a long
+    gap, as happens in the 'Muster' sheet — falls back to scanning the
+    whole sheet (rows 2-500) for the nearest usable row below instead. A
+    half-filled earlier import (few/no formulas) is skipped either way, in
+    favor of an older, fully formed row."""
+
+    def has_formulas(r):
+        return sum(
+            1 for c in range(1, MAX_COLUMN + 1)
+            if isinstance(ws.cell(row=r, column=c).value, str) and ws.cell(row=r, column=c).value.startswith("=")
+        ) >= min_formula_cells
+
+    for r in range(before_row, 1, -1):
+        if has_formulas(r):
+            return r
+    for r in range(before_row + 1, 500):
+        if ws.cell(row=r, column=1).value in (None, ""):
+            continue
+        if has_formulas(r):
+            return r
+    return None
+
+
+_CELL_REF_RE = re.compile(r"([A-Z]{1,3})(\d+)")
+
+
+def clone_formulas(ws, template_row: int, new_row: int, log=print):
+    """Copy every formula cell from template_row into new_row, with all of
+    that formula's OWN-ROW cell references (e.g. F26, AA26) rewritten to
+    new_row. Never touches manual/literal values (K='ja', addresses, rates,
+    etc.) — only cells whose value is a string starting with '='. Safe
+    because every real formula in this sheet only ever references its own
+    row (verified against the real files) — no cross-row references exist
+    to get wrong."""
+    if template_row is None:
+        log("    WARN: no template row found to clone formulas from — only I/J will be set")
+        return
+    cloned = 0
+    for c in range(1, MAX_COLUMN + 1):
+        src = ws.cell(row=template_row, column=c)
+        if not (isinstance(src.value, str) and src.value.startswith("=")):
+            continue
+
+        def repl(m):
+            col_letters, ref_row = m.group(1), int(m.group(2))
+            return f"{col_letters}{new_row}" if ref_row == template_row else m.group(0)
+
+        new_formula = _CELL_REF_RE.sub(repl, src.value)
+        ws.cell(row=new_row, column=c).value = new_formula
+        cloned += 1
+    log(f"    cloned {cloned} formulas from row {template_row} into row {new_row}")
+
+
 def append_reservation(ws, header_map, entry, log=print):
+    template_row = find_template_row(ws, last_used_row(ws))
     row = last_used_row(ws) + 1
 
     def set_field(field_key, value):
@@ -77,10 +155,16 @@ def append_reservation(ws, header_map, entry, log=print):
     checkout = parse_date(entry["checkout"])
     nights = (checkout - checkin).days
 
+    # Clone formulas FIRST so the plain-value fields below correctly
+    # overwrite any formula that happens to live in the same column (e.g.
+    # none currently do for our known fields, but this keeps the order safe
+    # if that ever changes).
+    clone_formulas(ws, template_row, row, log=log)
+
     set_field("guest_name", entry.get("guest_name"))
     set_field("platform", entry.get("platform"))
-    set_field("checkin", entry["checkin"] if isinstance(entry["checkin"], str) else checkin.isoformat())
-    set_field("checkout", entry["checkout"] if isinstance(entry["checkout"], str) else checkout.isoformat())
+    set_field("checkin", format_date_de(checkin))
+    set_field("checkout", format_date_de(checkout))
     set_field("checkout_day", WEEKDAYS_DE[checkout.weekday()])
     set_field("nights", nights)
     set_field("adults", entry.get("adults"))
@@ -101,9 +185,12 @@ def append_reservation(ws, header_map, entry, log=print):
         set_field("paid", guest_paid)
     if entry.get("cleaning_fee_charged") is not None:
         set_field("cleaning_fee_charged", entry["cleaning_fee_charged"])
+    if entry.get("platform_fee_total") is not None:
+        set_field("platform_commission", entry["platform_fee_total"])
 
-    # Structural formula columns (I, J) — safe because this is a brand new
-    # row referencing only its own cells; no other row is touched.
+    # Structural formula columns (I, J) — no header text, so set_field can't
+    # reach them; safe regardless of template_row because they only ever
+    # reference their own row.
     ws.cell(row=row, column=COL_I_ADULT_NIGHTS, value=f"=F{row}*G{row}")
     ws.cell(row=row, column=COL_J_CHILD_NIGHTS, value=f"=H{row}*F{row}")
 
@@ -116,7 +203,7 @@ def apply_cancellation(wb, header_map_cache, entry, log=print):
     if not code:
         log("    WARN: cancellation entry missing confirmation_code, skipping")
         return False
-    for sheet_name in ["1", "2", "3", "4"]:
+    for sheet_name in ["1", "2", "3", "4", FUTURE_YEAR_SHEET]:
         if sheet_name not in wb.sheetnames:
             continue
         ws = wb[sheet_name]
@@ -162,7 +249,7 @@ def process_batch(new_reservations, cancellations, log=print):
             skipped.append(r)
             continue
         wb = get_workbook(property_key)
-        sheet_name = quarter_sheet_for(parse_date(r["checkin"]))
+        sheet_name = target_sheet_for(parse_date(r["checkin"]))
         ws = wb[sheet_name]
         header_map = header_map_cache.setdefault(
             (property_key, sheet_name),
@@ -197,7 +284,7 @@ def update_reservation_fields(property_key, confirmation_code, updates: dict, lo
     wb = openpyxl.load_workbook(path)
     code = str(confirmation_code).strip()
     found = False
-    for sheet_name in ["1", "2", "3", "4"]:
+    for sheet_name in ["1", "2", "3", "4", FUTURE_YEAR_SHEET]:
         if sheet_name not in wb.sheetnames:
             continue
         ws = wb[sheet_name]

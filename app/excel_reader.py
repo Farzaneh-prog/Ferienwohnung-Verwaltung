@@ -14,7 +14,7 @@ so this does not depend on fixed column letters.
 import datetime
 import openpyxl
 
-from .config import QUARTER_SHEETS, NON_DATA_SHEETS, resolve_property_path
+from .config import QUARTER_SHEETS, FUTURE_YEAR_SHEET, NON_DATA_SHEETS, resolve_property_path
 
 # canonical field name -> exact header text in the workbook
 FIELD_HEADERS = {
@@ -38,6 +38,7 @@ FIELD_HEADERS = {
     "earned_per_night": "Verdient pro nacht (für mich)",
     "guest_email": "Email von Kunde",
     "cancelled": "Storniert",
+    "platform_commission": "Payment Charge von Booking",
 }
 
 
@@ -111,7 +112,7 @@ def load_reservations(property_key: str) -> list:
     workbook = openpyxl.load_workbook(path, read_only=True, data_only=True)
     try:
         reservations = []
-        for sheet_name in QUARTER_SHEETS:
+        for sheet_name in QUARTER_SHEETS + [FUTURE_YEAR_SHEET]:
             if sheet_name not in workbook.sheetnames or sheet_name in NON_DATA_SHEETS:
                 continue
             sheet = workbook[sheet_name]

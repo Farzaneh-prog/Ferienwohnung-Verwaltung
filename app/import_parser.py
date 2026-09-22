@@ -11,6 +11,7 @@ None of these exports include the guest's name or email — confirmed absent
 from all four real sample files during development. Those two fields always
 need the manual-completion step (see app/routes_import.py).
 """
+import csv
 import datetime
 import io
 
@@ -153,14 +154,39 @@ def parse_booking_detailed(path):
     return reservations, cancellations
 
 
+def _decode_bytes(raw):
+    """Airbnb's export encoding changed 2026-09-22 (was cp1252, now UTF-8
+    with a BOM — same day the delimiter also changed, see below) without
+    warning; try UTF-8 first (a genuine cp1252 file will almost always
+    contain a byte sequence invalid as UTF-8 and raise), fall back to
+    cp1252 for older files so both still work."""
+    try:
+        return raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        return raw.decode("cp1252")
+
+
 def _read_text_rows(path):
+    """Airbnb also switched delimiter 2026-09-22 — the older export was
+    tab-separated (no quoting seen), the new one is a real comma-separated
+    CSV with quoted fields, some containing embedded commas AND embedded
+    newlines (e.g. a multi-line note) — so this can't just split on a
+    hardcoded character/line-by-line anymore. Sniff comma vs tab from the
+    first physical line, then hand the WHOLE decoded text to the csv
+    module via StringIO so it does its own (quote-aware) line splitting —
+    pre-splitting on \\r\\n ourselves first, as an earlier version of this
+    function did, breaks any field with a real newline inside its quotes."""
     with open(path, "rb") as f:
         raw = f.read()
-    text = raw.decode("cp1252")
-    lines = [ln for ln in text.split("\r\n") if ln] or [ln for ln in text.split("\n") if ln]
-    header = lines[0].split("\t")
-    for line in lines[1:]:
-        values = [v.strip().strip('"') for v in line.split("\t")]
+    text = _decode_bytes(raw)
+    first_line = text.splitlines()[0] if text else ""
+    delimiter = "\t" if "\t" in first_line else ","
+    reader = csv.reader(io.StringIO(text), delimiter=delimiter)
+    header = next(reader)
+    for values in reader:
+        if not any(v.strip() for v in values):
+            continue
+        values = [v.strip() for v in values]
         if len(values) < len(header):
             values += [""] * (len(header) - len(values))
         yield dict(zip(header, values))
@@ -263,7 +289,7 @@ def detect_and_parse(path, filename):
         raise ValueError(f"Unrecognized .xls export format in {filename} (headers: {sorted(header)})")
     if lower.endswith(".csv"):
         with open(path, "rb") as f:
-            first_line = f.readline().decode("cp1252")
+            first_line = _decode_bytes(f.readline())
         if "Bestätigungs-Code" in first_line and "Typ" in first_line:
             res, can = parse_airbnb_csv(path)
             return res, can, "airbnb_csv"

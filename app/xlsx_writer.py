@@ -69,6 +69,43 @@ EXPLICIT_FORMULAS = {
     # U (bezahlt zum putzfrau) — placeholder default, see EXPLICIT_LITERALS
     # comment below; real value once the actual cleaner/hours are known.
     "U": "=T{r}*12",
+    # AN-BE (except AT, which is property-specific — see
+    # EXPLICIT_FORMULAS_BY_PROPERTY below) — taken verbatim from the final
+    # AK-BE table in نظافتچی_ها-و-فرمول_های-مالی.md (documented, not just
+    # cloned from a neighboring row).
+    "AN": "=ROUND(AK{r}*F{r},2)",
+    "AO": '=IF(AQ{r}="ja","§13b UStG",ROUND((AN{r}+AF{r})*0.07,2))',
+    "AP": '=IF(AQ{r}="ja","§13b UStG",ROUND(AG{r}*0.19,2))',
+    "AR": "=AN{r}+AF{r}+AG{r}+AH{r}",
+    "AS": "=ROUND(AK{r},2)",
+    "AU": '=IF(B{r}="Airbnb","Airbnb Bestätigungscode: ",IF(B{r}="booking","Booking number: "," "))',
+    "BE": "=Q{r}/F{r}",
+    # Q, AB, AC, AE, AH, AI, AJ — confirmed by Farzaneh 2026-09-16. These
+    # were the only 7 columns with NO documentation anywhere (not in either
+    # architecture doc, not hardcoded) — everything else in the AK-BE range
+    # was already covered by نظافتچی_ها-و-فرمول_های-مالی.md.
+    "Q": '=IF(B{r}="booking",O{r}-U{r}-M{r}-AA{r}-AX{r}-AO{r},O{r}-U{r}-M{r}-AA{r}-AX{r}-AO{r}-AP{r})',
+    "AB": "=AA{r}*0.19",
+    "AC": "=AA{r}+AB{r}",
+    "AE": "=O{r}",
+    "AH": "=M{r}",
+    "AI": '=IF(AQ{r}="ja",AE{r}-AF{r}-AG{r}-AH{r},AE{r}-AF{r}*1.07-AG{r}*1.19-AH{r})',
+    "AJ": "=AI{r}/F{r}",
+}
+# AT (Stell / Stellplatz-Hinweistext) differs by property — Karlstraße says
+# "exkl. Stellplatz" (parking not included), Eisenach says "inkl." (parking
+# IS included in that property's price) — per
+# نظافتچی_ها-و-فرمول_های-مالی.md. Nested IF (not OR(...)) to match the
+# real formula text exactly, confirmed by Farzaneh 2026-09-16. Applied on
+# top of EXPLICIT_FORMULAS, keyed by the reservation's own property, not
+# the sheet/file it lands in.
+EXPLICIT_FORMULAS_BY_PROPERTY = {
+    "karlstrasse": {
+        "AT": '=IF(B{r}="Airbnb",", exkl. Stellplatz.",IF(B{r}="booking",", exkl. Stellplatz.","."))',
+    },
+    "eisenach": {
+        "AT": '=IF(B{r}="Airbnb",", inkl. Stellplatz.",IF(B{r}="booking",", inkl. Stellplatz.","."))',
+    },
 }
 # AG (Stellplatz) = 0 is a permanent constant (never has a value in the
 # real data). S/T/V are PLACEHOLDER defaults, not real values — Farzaneh
@@ -85,14 +122,16 @@ EXPLICIT_LITERALS = {
 }
 
 
-def set_explicit_cells(ws, row, log=print):
-    for letter, template in EXPLICIT_FORMULAS.items():
+def set_explicit_cells(ws, row, property_key, log=print):
+    formulas = dict(EXPLICIT_FORMULAS)
+    formulas.update(EXPLICIT_FORMULAS_BY_PROPERTY.get(property_key, {}))
+    for letter, template in formulas.items():
         col = column_index_from_string(letter)
         ws.cell(row=row, column=col).value = template.format(r=row)
     for letter, value in EXPLICIT_LITERALS.items():
         col = column_index_from_string(letter)
         ws.cell(row=row, column=col).value = value
-    log(f"    set {len(EXPLICIT_FORMULAS)} explicit formulas + {len(EXPLICIT_LITERALS)} literal(s) on row {row}")
+    log(f"    set {len(formulas)} explicit formulas + {len(EXPLICIT_LITERALS)} literal(s) on row {row}")
 
 # How many columns wide a row can be (A..BH ~ 60) — used when scanning a
 # template row for formulas to clone.
@@ -276,15 +315,17 @@ def append_reservation(ws, header_map, entry, log=print):
     # Reinigungsgebühr). Set unconditionally, referencing P{row} directly.
     set_field("cleaning_fee_charged", f'=IF(R{row}="ja",P{row},P{row}/1.07)')
 
-    # AA (Nettobetrag) = the Booking.com 'detailed' export's pure Commission
-    # amount. AX (Payment Charge von Booking) = the 'simple' export's
+    # AA (Nettobetrag) = the platform fee: Booking.com detailed export's
+    # pure "Commission amount", OR Airbnb's "Servicegebühr" (confirmed by
+    # Farzaneh 2026-09-16 as "Booking, Airbnb gebühr" — applies to both,
+    # not Booking-only as an earlier version of this comment incorrectly
+    # claimed). AX (Payment Charge von Booking) = the 'simple' export's
     # Commission (which combines that SAME commission with an extra payment
     # -processing fee) minus AA — isolating just the payment-processing
-    # portion, which is what AX's name actually means. Both come from
-    # Booking.com specifically; only written when we actually have the
-    # matching figure(s) — never guessed, and not applied to Airbnb entries
-    # (their fee breakdown means something different — see
-    # docs/cowork-command.md history).
+    # portion, which is what AX's name actually means; AX is Booking.com-
+    # only (Airbnb's simple export has no such combined-fee figure to
+    # subtract from). Only written when we actually have the matching
+    # figure(s) — never guessed.
     commission_pure = entry.get("platform_fee_total")   # detailed export
     commission_combined = entry.get("platform_fee_combined")  # simple export
     if commission_pure is not None:
@@ -298,17 +339,22 @@ def append_reservation(ws, header_map, entry, log=print):
     ws.cell(row=row, column=COL_I_ADULT_NIGHTS, value=f"=F{row}*G{row}")
     ws.cell(row=row, column=COL_J_CHILD_NIGHTS, value=f"=H{row}*F{row}")
 
-    set_explicit_cells(ws, row, log=log)
+    set_explicit_cells(ws, row, entry.get("property"), log=log)
 
     log(f"    appended row {row}: {entry.get('guest_name')} ({entry['checkin']} -> {entry['checkout']})")
     return row
 
 
 def apply_cancellation(wb, header_map_cache, entry, log=print):
+    """Returns None if no matching row was found, otherwise a dict with the
+    cancelled row's own checkout/adults/children — used by process_batch to
+    best-effort flag the matching Putzplan row too (see putzplan_writer;
+    Putzplan is keyed on Abreise/checkout, not checkin — confirmed
+    2026-09-22)."""
     code = str(entry.get("confirmation_code", "")).strip()
     if not code:
         log("    WARN: cancellation entry missing confirmation_code, skipping")
-        return False
+        return None
     for sheet_name in ["1", "2", "3", "4", FUTURE_YEAR_SHEET]:
         if sheet_name not in wb.sheetnames:
             continue
@@ -318,6 +364,9 @@ def apply_cancellation(wb, header_map_cache, entry, log=print):
         )
         code_col = header_map.get(FIELD_HEADERS["confirmation_code"])
         flag_col = header_map.get(FIELD_HEADERS["cancelled"])
+        checkout_col = header_map.get(FIELD_HEADERS["checkout"])
+        adults_col = header_map.get(FIELD_HEADERS["adults"])
+        children_col = header_map.get(FIELD_HEADERS["children"])
         if code_col is None or flag_col is None:
             continue
         row = 1
@@ -327,19 +376,35 @@ def apply_cancellation(wb, header_map_cache, entry, log=print):
             if str(cell_val).strip() == code:
                 ws.cell(row=row, column=flag_col + 1, value="ja")
                 log(f"    marked row {row} (sheet {sheet_name}) as Storniert (code={code})")
-                return True
+                return {
+                    "checkout": ws.cell(row=row, column=checkout_col + 1).value if checkout_col is not None else None,
+                    "adults": ws.cell(row=row, column=adults_col + 1).value if adults_col is not None else None,
+                    "children": ws.cell(row=row, column=children_col + 1).value if children_col is not None else None,
+                }
     log(f"    WARN: confirmation_code {code} not found, cancellation not applied")
-    return False
+    return None
 
 
 def process_batch(new_reservations, cancellations, log=print):
     """Apply a batch of reservations/cancellations across however many
     properties they touch, backing up each touched file exactly once. Used
-    by both the Cowork pipeline and the manual CSV/XLS import."""
+    by both the Cowork pipeline and the manual CSV/XLS import.
+
+    Also updates Putzplan2026.xlsx (the cleaner schedule) — a new
+    reservation gets a Putzplan row, a cancellation gets its matching row
+    (if found) flagged 'storniert'. Local import to avoid a circular
+    import (putzplan_writer imports from this module). Deliberately only
+    for reservations THIS app processes going forward (2026-09-22 scope
+    decision, see putzplan_writer.py docstring) — done AFTER the
+    GästeListe files are saved, so the same-day-checkout check in
+    putzplan_writer reads fresh data including this batch's own rows."""
+    from . import putzplan_writer
+
     touched_files = {}  # property -> [path, workbook]
     header_map_cache = {}
     applied_rows = []
     skipped = []
+    cancelled_info = []  # (property_key, {checkin, adults, children})
 
     def get_workbook(property_key):
         if property_key not in touched_files:
@@ -372,11 +437,20 @@ def process_batch(new_reservations, cancellations, log=print):
             continue
         wb = get_workbook(property_key)
         cache_for_property = {k[1]: v for k, v in header_map_cache.items() if k[0] == property_key}
-        apply_cancellation(wb, cache_for_property, c, log=log)
+        cancelled_row = apply_cancellation(wb, cache_for_property, c, log=log)
+        if cancelled_row is not None:
+            cancelled_info.append((property_key, cancelled_row))
 
     for property_key, (path, wb) in touched_files.items():
         wb.save(path)
         log(f"    saved {path}")
+
+    for applied in applied_rows:
+        putzplan_writer.append_putzplan_row(applied["entry"], log=log)
+    for property_key, cancelled_row in cancelled_info:
+        putzplan_writer.flag_putzplan_cancelled(
+            property_key, cancelled_row["checkout"], cancelled_row["adults"], cancelled_row["children"], log=log
+        )
 
     return {"applied": applied_rows, "skipped": skipped, "files_touched": list(touched_files.keys())}
 

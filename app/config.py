@@ -51,3 +51,21 @@ def resolve_property_path(property_key: str) -> str:
     """Return the absolute path to a property's Excel file."""
     filename = PROPERTY_FILES[property_key]
     return os.path.join(DATA_DIR, filename)
+
+
+# --- Putzplan (cleaner schedule) ---------------------------------------
+# Separate flat file, one row per reservation's Anreise (check-in) — NOT
+# per property/quarter like GästeListe. Confirmed with Farzaneh 2026-09-22.
+PUTZPLAN_FILE = "Putzplan2026.xlsx"
+PUTZPLAN_SHEET = "Tabelle1"
+
+# Putzplan's "Wohnung" column uses the STREET name, not the property_key
+# used everywhere else — "Pfarrberg" for eisenach (matches the "_Pf" suffix
+# already used in GästeListe_2026_Pf.xlsx), "Karlstraße" for karlstrasse.
+PUTZPLAN_WOHNUNG_LABELS = {
+    "karlstrasse": "Karlstraße",
+    "eisenach": "Pfarrberg",
+}
+
+# Always the same fixed string in every real row (confirmed 2026-09-22).
+PUTZPLAN_CLEANING_WINDOW = "zwischen 10 bis 15 Uhr"

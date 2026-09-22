@@ -13,6 +13,11 @@ reservations.xlsx
 backups/
 data/
 
+# Cleaner schedule — real cleaner names + guest headcounts, same reasoning
+# as GästeListe above (found untracked-but-not-ignored 2026-09-22, now the
+# app writes to it automatically).
+Putzplan*.xlsx
+
 # Python
 __pycache__/
 *.pyc

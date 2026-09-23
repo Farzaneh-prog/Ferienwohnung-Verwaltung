@@ -15,6 +15,7 @@ import datetime
 import openpyxl
 
 from .config import QUARTER_SHEETS, FUTURE_YEAR_SHEET, NON_DATA_SHEETS, resolve_property_path
+from .known_codes import get_known_codes
 
 # canonical field name -> exact header text in the workbook
 FIELD_HEADERS = {
@@ -99,12 +100,21 @@ def find_incomplete_reservations(property_key: str) -> list:
 def get_existing_confirmation_codes(property_key: str) -> set:
     """All confirmation codes already present for a property, normalized to
     str, for de-duplicating imports (a CSV export can overlap what's already
-    in the sheet — e.g. Airbnb's exports can't be filtered by booking date)."""
+    in the sheet — e.g. Airbnb's exports can't be filtered by booking date).
+
+    Also includes app/known_codes.py's persistent record — codes this app
+    has ever added or cancelled, kept even after Farzaneh manually deletes
+    a cancelled row from GästeListe (2026-09-23 decision: she deletes
+    cancellations outright, rather than leaving Storniert=ja in place, so
+    the un-SUMIFS'd yearly total formulas don't double-count them; without
+    this second record, a re-uploaded old export would look like a brand
+    new reservation and get re-added — see git history 2026-09-22/23)."""
     codes = set()
     for r in load_reservations(property_key):
         code = r.get("confirmation_code")
         if code not in (None, ""):
             codes.add(str(code).strip())
+    codes |= get_known_codes(property_key)
     return codes
 
 

@@ -23,6 +23,7 @@ from openpyxl.utils import get_column_letter, column_index_from_string
 
 from .config import PROPERTY_FILES, PROPERTY_FILE_YEAR, FUTURE_YEAR_SHEET, DATA_DIR
 from .excel_reader import FIELD_HEADERS, _build_header_map
+from . import known_codes
 
 # Column indices (1-based) with no header text — structural, not name-addressable.
 COL_I_ADULT_NIGHTS = 9    # =F*G
@@ -451,6 +452,20 @@ def process_batch(new_reservations, cancellations, log=print):
         putzplan_writer.flag_putzplan_cancelled(
             property_key, cancelled_row["checkout"], cancelled_row["adults"], cancelled_row["children"], log=log
         )
+
+    # Record every code this batch touched — added OR cancelled, whether or
+    # not the cancellation actually found a row to flag — in known_codes.py
+    # so dedup still works even after Farzaneh manually deletes the row
+    # (2026-09-23 decision, see known_codes.py docstring).
+    codes_by_property = {}
+    for applied in applied_rows:
+        codes_by_property.setdefault(applied["property"], set()).add(applied["entry"].get("confirmation_code"))
+    for c in cancellations:
+        property_key = c.get("property")
+        if property_key in PROPERTY_FILES:
+            codes_by_property.setdefault(property_key, set()).add(c.get("confirmation_code"))
+    for property_key, codes in codes_by_property.items():
+        known_codes.record_codes(property_key, codes)
 
     return {"applied": applied_rows, "skipped": skipped, "files_touched": list(touched_files.keys())}
 

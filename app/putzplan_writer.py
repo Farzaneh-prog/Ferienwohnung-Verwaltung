@@ -148,6 +148,60 @@ def append_putzplan_row(entry, log=print):
     log(f"    Putzplan: inserted row {row} ({wohnung}, {format_date_de(checkout_date)}, gleicher Tag={same_day})")
 
 
+def _find_matching_row(ws, wohnung, target_date_str, adults, children):
+    """Best-effort match on (Wohnung, Datum, Erwachsene, Kinder unter 18) —
+    the same heuristic Farzaneh already uses by eye, since Putzplan has no
+    confirmation-code column to match on exactly. Shared by
+    flag_putzplan_cancelled and sync_putzplan_guest_counts."""
+    for row in range(2, ws.max_row + 1):
+        if ws.cell(row=row, column=COL_WOHNUNG).value != wohnung:
+            continue
+        if ws.cell(row=row, column=COL_DATUM).value != target_date_str:
+            continue
+        row_adults = ws.cell(row=row, column=COL_ERWACHSENE).value
+        row_children = ws.cell(row=row, column=COL_KINDER_U18).value or 0
+        if row_adults != adults or row_children != (children or 0):
+            continue
+        return row
+    return None
+
+
+def sync_putzplan_guest_counts(property_key, checkout_date, old_adults, old_children, new_adults, new_children, log=print):
+    """Called when update_reservation_fields (the /complete form, or a
+    re-import that now has real adults/children where GästeListe only had
+    a placeholder) fills in real guest counts for an existing reservation
+    — confirmed 2026-09-23 that Putzplan rows created earlier from
+    incomplete data (e.g. a booking_simple import with no adults/children)
+    otherwise stay stale forever, since append_putzplan_row only runs once
+    at creation. Matches on the OLD counts (what Putzplan still has),
+    since the new counts are exactly what's changing and can't be part of
+    the match key."""
+    wohnung = PUTZPLAN_WOHNUNG_LABELS.get(property_key)
+    if wohnung is None or checkout_date is None:
+        return
+
+    path = _putzplan_path()
+    if not os.path.exists(path):
+        return
+
+    target_date_str = format_date_de(checkout_date) if isinstance(checkout_date, datetime.date) else str(checkout_date)
+
+    backup_file(path)
+    wb = openpyxl.load_workbook(path)
+    ws = wb[PUTZPLAN_SHEET]
+
+    row = _find_matching_row(ws, wohnung, target_date_str, old_adults, old_children)
+    if row is None:
+        log(f"    Putzplan: no matching row found to sync guest counts ({wohnung}, {target_date_str}) — skipped")
+        return
+
+    if new_adults is not None:
+        ws.cell(row=row, column=COL_ERWACHSENE, value=new_adults)
+    ws.cell(row=row, column=COL_KINDER_U18, value=new_children or 0)
+    wb.save(path)
+    log(f"    Putzplan: synced row {row} guest counts ({wohnung}, {target_date_str}) -> adults={new_adults}, children={new_children}")
+
+
 def flag_putzplan_cancelled(property_key, checkout_date, adults, children, log=print):
     """Best-effort match on (Wohnung, Datum, Erwachsene, Kinder unter 18) —
     the same heuristic Farzaneh already uses by eye, since Putzplan has no
@@ -172,18 +226,11 @@ def flag_putzplan_cancelled(property_key, checkout_date, adults, children, log=p
     wb = openpyxl.load_workbook(path)
     ws = wb[PUTZPLAN_SHEET]
 
-    for row in range(2, ws.max_row + 1):
-        if ws.cell(row=row, column=COL_WOHNUNG).value != wohnung:
-            continue
-        if ws.cell(row=row, column=COL_DATUM).value != target_date_str:
-            continue
-        row_adults = ws.cell(row=row, column=COL_ERWACHSENE).value
-        row_children = ws.cell(row=row, column=COL_KINDER_U18).value or 0
-        if row_adults != adults or row_children != (children or 0):
-            continue
-        ws.cell(row=row, column=COL_CHECKIN_UHR, value="storniert")
-        wb.save(path)
-        log(f"    Putzplan: marked row {row} storniert ({wohnung}, {target_date_str})")
+    row = _find_matching_row(ws, wohnung, target_date_str, adults, children)
+    if row is None:
+        log(f"    Putzplan: no matching row found to flag cancelled ({wohnung}, {target_date_str}) — skipped")
         return
 
-    log(f"    Putzplan: no matching row found to flag cancelled ({wohnung}, {target_date_str}) — skipped")
+    ws.cell(row=row, column=COL_CHECKIN_UHR, value="storniert")
+    wb.save(path)
+    log(f"    Putzplan: marked row {row} storniert ({wohnung}, {target_date_str})")

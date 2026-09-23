@@ -473,24 +473,38 @@ def process_batch(new_reservations, cancellations, log=print):
 def update_reservation_fields(property_key, confirmation_code, updates: dict, log=print):
     """Locates a row by confirmation code and updates only the given fields
     (e.g. from the manual-completion form: real guest_name/guest_email/
-    adults/children replacing a placeholder). Backs up the file first."""
+    adults/children replacing a placeholder). Backs up the file first.
+
+    If 'adults' or 'children' is among the updates, also syncs the
+    matching Putzplan row (2026-09-23) — append_putzplan_row only runs
+    once, at creation, so a reservation first imported with incomplete
+    data (e.g. booking_simple, no guest counts) and later completed via
+    /complete or a detailed re-import would otherwise leave Putzplan
+    showing the old/blank counts forever."""
     path = os.path.join(DATA_DIR, PROPERTY_FILES[property_key])
     backup_file(path)
     wb = openpyxl.load_workbook(path)
     code = str(confirmation_code).strip()
     found = False
+    checkout_value = old_adults = old_children = None
     for sheet_name in ["1", "2", "3", "4", FUTURE_YEAR_SHEET]:
         if sheet_name not in wb.sheetnames:
             continue
         ws = wb[sheet_name]
         header_map = _build_header_map(next(ws.iter_rows(min_row=1, max_row=1, values_only=True)))
         code_col = header_map.get(FIELD_HEADERS["confirmation_code"])
+        checkout_col = header_map.get(FIELD_HEADERS["checkout"])
+        adults_col = header_map.get(FIELD_HEADERS["adults"])
+        children_col = header_map.get(FIELD_HEADERS["children"])
         if code_col is None:
             continue
         row = 1
         while ws.cell(row=row + 1, column=1).value not in (None, ""):
             row += 1
             if str(ws.cell(row=row, column=code_col + 1).value).strip() == code:
+                checkout_value = ws.cell(row=row, column=checkout_col + 1).value if checkout_col is not None else None
+                old_adults = ws.cell(row=row, column=adults_col + 1).value if adults_col is not None else None
+                old_children = ws.cell(row=row, column=children_col + 1).value if children_col is not None else None
                 for field_key, value in updates.items():
                     header = FIELD_HEADERS.get(field_key)
                     col = header_map.get(header) if header else None
@@ -505,6 +519,18 @@ def update_reservation_fields(property_key, confirmation_code, updates: dict, lo
     if found:
         wb.save(path)
         log(f"    updated row for code={code} in {path}")
+        if ("adults" in updates or "children" in updates) and checkout_value is not None:
+            from . import putzplan_writer  # local import to avoid a circular import
+
+            putzplan_writer.sync_putzplan_guest_counts(
+                property_key,
+                checkout_value,
+                old_adults,
+                old_children,
+                updates.get("adults", old_adults),
+                updates.get("children", old_children),
+                log=log,
+            )
     else:
         log(f"    WARN: code={code} not found in {path}, nothing updated")
     return found

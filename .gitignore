@@ -5,6 +5,7 @@
 
 # Secrets
 .env
+Pass.docx
 
 # Real reservation data (never commit real guest data)
 GästeListe_*.xlsx

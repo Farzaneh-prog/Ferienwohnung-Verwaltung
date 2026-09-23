@@ -36,6 +36,14 @@ def detect_property(text: str):
         return "karlstrasse"
     if "eisenach" in t:
         return "eisenach"
+    # Booking.com's "Unit type" cell for Eisenach/Pfarrberg is a marketing
+    # name with none of the words above in it — confirmed with Farzaneh
+    # 2026-09-22 after 8 real reservation rows silently got skipped (no
+    # error, just dropped) because this text matched neither check. Airbnb's
+    # own listing names already contain "Eisenach" literally, so this is
+    # Booking-specific.
+    if "traumwebers r" in t and "feenparadies" in t:
+        return "eisenach"
     return None
 
 

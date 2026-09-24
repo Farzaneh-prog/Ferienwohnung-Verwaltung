@@ -347,11 +347,10 @@ def append_reservation(ws, header_map, entry, log=print):
 
 
 def apply_cancellation(wb, header_map_cache, entry, log=print):
-    """Returns None if no matching row was found, otherwise a dict with the
-    cancelled row's own checkout/adults/children — used by process_batch to
-    best-effort flag the matching Putzplan row too (see putzplan_writer;
-    Putzplan is keyed on Abreise/checkout, not checkin — confirmed
-    2026-09-22)."""
+    """Returns None if no matching row was found, otherwise the cancelled
+    row's own checkout date — used by process_batch to best-effort flag
+    the matching Putzplan row too (see putzplan_writer; Putzplan is keyed
+    on Abreise/checkout, not checkin — confirmed 2026-09-22)."""
     code = str(entry.get("confirmation_code", "")).strip()
     if not code:
         log("    WARN: cancellation entry missing confirmation_code, skipping")
@@ -366,8 +365,6 @@ def apply_cancellation(wb, header_map_cache, entry, log=print):
         code_col = header_map.get(FIELD_HEADERS["confirmation_code"])
         flag_col = header_map.get(FIELD_HEADERS["cancelled"])
         checkout_col = header_map.get(FIELD_HEADERS["checkout"])
-        adults_col = header_map.get(FIELD_HEADERS["adults"])
-        children_col = header_map.get(FIELD_HEADERS["children"])
         if code_col is None or flag_col is None:
             continue
         row = 1
@@ -377,11 +374,7 @@ def apply_cancellation(wb, header_map_cache, entry, log=print):
             if str(cell_val).strip() == code:
                 ws.cell(row=row, column=flag_col + 1, value="ja")
                 log(f"    marked row {row} (sheet {sheet_name}) as Storniert (code={code})")
-                return {
-                    "checkout": ws.cell(row=row, column=checkout_col + 1).value if checkout_col is not None else None,
-                    "adults": ws.cell(row=row, column=adults_col + 1).value if adults_col is not None else None,
-                    "children": ws.cell(row=row, column=children_col + 1).value if children_col is not None else None,
-                }
+                return ws.cell(row=row, column=checkout_col + 1).value if checkout_col is not None else None
     log(f"    WARN: confirmation_code {code} not found, cancellation not applied")
     return None
 
@@ -438,9 +431,9 @@ def process_batch(new_reservations, cancellations, log=print):
             continue
         wb = get_workbook(property_key)
         cache_for_property = {k[1]: v for k, v in header_map_cache.items() if k[0] == property_key}
-        cancelled_row = apply_cancellation(wb, cache_for_property, c, log=log)
-        if cancelled_row is not None:
-            cancelled_info.append((property_key, cancelled_row))
+        checkout_value = apply_cancellation(wb, cache_for_property, c, log=log)
+        if checkout_value is not None:
+            cancelled_info.append((property_key, checkout_value))
 
     for property_key, (path, wb) in touched_files.items():
         wb.save(path)
@@ -448,10 +441,8 @@ def process_batch(new_reservations, cancellations, log=print):
 
     for applied in applied_rows:
         putzplan_writer.append_putzplan_row(applied["entry"], log=log)
-    for property_key, cancelled_row in cancelled_info:
-        putzplan_writer.flag_putzplan_cancelled(
-            property_key, cancelled_row["checkout"], cancelled_row["adults"], cancelled_row["children"], log=log
-        )
+    for property_key, checkout_value in cancelled_info:
+        putzplan_writer.flag_putzplan_cancelled(property_key, checkout_value, log=log)
 
     # Record every code this batch touched — added OR cancelled, whether or
     # not the cancellation actually found a row to flag — in known_codes.py
@@ -475,25 +466,26 @@ def update_reservation_fields(property_key, confirmation_code, updates: dict, lo
     (e.g. from the manual-completion form: real guest_name/guest_email/
     adults/children replacing a placeholder). Backs up the file first.
 
-    If 'adults' or 'children' is among the updates, also syncs the
-    matching Putzplan row (2026-09-23) — append_putzplan_row only runs
-    once, at creation, so a reservation first imported with incomplete
-    data (e.g. booking_simple, no guest counts) and later completed via
-    /complete or a detailed re-import would otherwise leave Putzplan
-    showing the old/blank counts forever."""
+    If 'adults' or 'children' is among the updates, also refreshes
+    whichever Putzplan row shows THIS reservation as its next guests
+    (2026-09-24) — Putzplan displays the upcoming reservation's headcount,
+    not the departing one's, so a reservation first imported with
+    incomplete data (e.g. booking_simple, no guest counts) and later
+    completed via /complete or a detailed re-import would otherwise leave
+    that preceding departure's row showing the old/blank counts forever."""
     path = os.path.join(DATA_DIR, PROPERTY_FILES[property_key])
     backup_file(path)
     wb = openpyxl.load_workbook(path)
     code = str(confirmation_code).strip()
     found = False
-    checkout_value = old_adults = old_children = None
+    checkin_value = final_adults = final_children = None
     for sheet_name in ["1", "2", "3", "4", FUTURE_YEAR_SHEET]:
         if sheet_name not in wb.sheetnames:
             continue
         ws = wb[sheet_name]
         header_map = _build_header_map(next(ws.iter_rows(min_row=1, max_row=1, values_only=True)))
         code_col = header_map.get(FIELD_HEADERS["confirmation_code"])
-        checkout_col = header_map.get(FIELD_HEADERS["checkout"])
+        checkin_col = header_map.get(FIELD_HEADERS["checkin"])
         adults_col = header_map.get(FIELD_HEADERS["adults"])
         children_col = header_map.get(FIELD_HEADERS["children"])
         if code_col is None:
@@ -502,9 +494,7 @@ def update_reservation_fields(property_key, confirmation_code, updates: dict, lo
         while ws.cell(row=row + 1, column=1).value not in (None, ""):
             row += 1
             if str(ws.cell(row=row, column=code_col + 1).value).strip() == code:
-                checkout_value = ws.cell(row=row, column=checkout_col + 1).value if checkout_col is not None else None
-                old_adults = ws.cell(row=row, column=adults_col + 1).value if adults_col is not None else None
-                old_children = ws.cell(row=row, column=children_col + 1).value if children_col is not None else None
+                checkin_value = ws.cell(row=row, column=checkin_col + 1).value if checkin_col is not None else None
                 for field_key, value in updates.items():
                     header = FIELD_HEADERS.get(field_key)
                     col = header_map.get(header) if header else None
@@ -512,6 +502,11 @@ def update_reservation_fields(property_key, confirmation_code, updates: dict, lo
                         log(f"    WARN: column for '{field_key}' not found, skipping")
                         continue
                     ws.cell(row=row, column=col + 1).value = value
+                # Read back the FINAL values (not just what's in `updates`
+                # this call) — a partial update (e.g. only adults, not
+                # children) would otherwise wipe the other one when synced.
+                final_adults = ws.cell(row=row, column=adults_col + 1).value if adults_col is not None else None
+                final_children = ws.cell(row=row, column=children_col + 1).value if children_col is not None else None
                 found = True
                 break
         if found:
@@ -519,16 +514,15 @@ def update_reservation_fields(property_key, confirmation_code, updates: dict, lo
     if found:
         wb.save(path)
         log(f"    updated row for code={code} in {path}")
-        if ("adults" in updates or "children" in updates) and checkout_value is not None:
+        if ("adults" in updates or "children" in updates) and checkin_value is not None:
             from . import putzplan_writer  # local import to avoid a circular import
 
-            putzplan_writer.sync_putzplan_guest_counts(
+            putzplan_writer.sync_putzplan_for_reservation(
                 property_key,
-                checkout_value,
-                old_adults,
-                old_children,
-                updates.get("adults", old_adults),
-                updates.get("children", old_children),
+                checkin_value,
+                final_adults,
+                final_children,
+                code,
                 log=log,
             )
     else:

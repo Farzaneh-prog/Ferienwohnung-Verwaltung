@@ -1,9 +1,21 @@
 """
 Writes the cleaner schedule (Putzplan2026.xlsx) — one row per reservation's
 Abreise (check-OUT) date, since cleaning happens right after a guest
-leaves (confirmed with Farzaneh 2026-09-22 — an earlier version of this
-module used Anreise/check-in, which was wrong; corrected same day before
-any real data was touched by the wrong version).
+leaves (confirmed with Farzaneh 2026-09-22).
+
+Guest counts (columns G/H, Erwachsene/Kinder unter 18) show the NEXT
+reservation's headcount, not the departing guests' — confirmed 2026-09-24.
+The cleaner needs to know who's arriving next (how many beds/towels to
+prepare), not who just left. An earlier version of this module wrote the
+departing reservation's own counts, which was wrong; corrected same day.
+
+Because "next reservation" isn't always known yet when a row is created
+(the next guest might not be booked at all, or might get booked/completed
+later), every place that learns a reservation's checkin+guest-count also
+tries to refresh the PRECEDING departure's Putzplan row (see
+_sync_previous_departure) — covers both "a new booking arrives after its
+predecessor's row already exists" and "an existing reservation's counts
+get filled in later via /complete".
 
 Scope, by explicit decision (2026-09-22): only NEW reservations processed
 by this app from now on get a Putzplan row. The existing 179 rows were
@@ -17,6 +29,11 @@ avoid breaking formula row-references), a real physical row insertion at
 the chronologically correct position is safe here and matches the sheet's
 existing global date order (both properties interleaved by Datum).
 
+Row matching (Wohnung, Datum) is treated as unique — each property here
+is a single physical unit, so only one reservation can check out of it on
+any given day. Simpler and more reliable than the earlier guest-count-
+based heuristic this module used before 2026-09-24.
+
 NOT implemented here (2026-09-22, needs its own data source first):
 Farzaneh described a staffing-gap escalation — if the next guest does
 NOT arrive the same day (column F = Nein) AND no regular cleaner is
@@ -26,6 +43,13 @@ This depends on a cleaner-availability roster that doesn't exist yet
 anywhere in this app (column A / cleaner assignment is still fully
 manual, phase 5 in the architecture doc) — revisit once that roster is
 built, not before.
+
+NOT implemented here (2026-09-24, known limitation): if a reservation
+that was some earlier departure's "next" gets cancelled, that earlier
+row's guest counts go stale again (still show the now-cancelled
+reservation's headcount) — cancellation doesn't currently trigger a
+re-lookup of the new actual next. Low-frequency edge case; revisit if it
+turns out to matter in practice.
 """
 import datetime
 import os
@@ -67,6 +91,16 @@ def _parse_de_date(value):
         return None
 
 
+def _to_date(value):
+    """Normalize a GästeListe date cell (openpyxl datetime, or our own
+    'DD.MM.YYYY' text) to a plain date, or None."""
+    if isinstance(value, datetime.datetime):
+        return value.date()
+    if isinstance(value, datetime.date):
+        return value
+    return _parse_de_date(value)
+
+
 def _find_insert_row(ws, target_date):
     """1-based row to insert at so column C (Datum) stays sorted. Scans the
     WHOLE sheet (not just until the first gap) because real gaps exist —
@@ -84,24 +118,93 @@ def _find_insert_row(ws, target_date):
     return last_dated_row + 1
 
 
-def _has_same_day_checkin(property_key, checkout_date, exclude_confirmation_code):
-    """True if another (non-cancelled) reservation at the same property
-    checks IN on this reservation's check-out date — a same-day turnover,
-    which is what column F flags (confirmed 2026-09-22: does the NEXT
-    guest also arrive the same day the departing guest leaves)."""
+def _find_row_by_date(ws, wohnung, target_date_str):
+    """(Wohnung, Datum) is unique — see module docstring."""
+    for row in range(2, ws.max_row + 1):
+        if ws.cell(row=row, column=COL_WOHNUNG).value != wohnung:
+            continue
+        if ws.cell(row=row, column=COL_DATUM).value != target_date_str:
+            continue
+        return row
+    return None
+
+
+def _find_next_reservation(property_key, checkout_date, exclude_confirmation_code):
+    """The reservation checking IN soonest at/after checkout_date, at the
+    same property (excluding the departing reservation itself and any
+    cancelled ones) — this is who Putzplan needs to describe."""
+    candidates = []
     for r in load_reservations(property_key):
         if str(r.get("confirmation_code", "")).strip() == str(exclude_confirmation_code).strip():
             continue
         if str(r.get("cancelled", "")).strip().lower() == "ja":
             continue
-        checkin = r.get("checkin")
-        if isinstance(checkin, (datetime.date, datetime.datetime)):
-            checkin_date = checkin.date() if isinstance(checkin, datetime.datetime) else checkin
-        else:
-            checkin_date = _parse_de_date(checkin)
-        if checkin_date == checkout_date:
-            return True
-    return False
+        checkin_date = _to_date(r.get("checkin"))
+        if checkin_date is None or checkin_date < checkout_date:
+            continue
+        candidates.append((checkin_date, r))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda pair: pair[0])
+    return candidates[0][1]
+
+
+def _find_previous_departure(property_key, checkin_date, exclude_confirmation_code):
+    """Reverse of _find_next_reservation — the reservation checking OUT
+    most recently at/before checkin_date, at the same property. Used to
+    find which existing Putzplan row (dated at that departure) should now
+    describe THIS reservation as its next guests."""
+    candidates = []
+    for r in load_reservations(property_key):
+        if str(r.get("confirmation_code", "")).strip() == str(exclude_confirmation_code).strip():
+            continue
+        if str(r.get("cancelled", "")).strip().lower() == "ja":
+            continue
+        checkout_date = _to_date(r.get("checkout"))
+        if checkout_date is None or checkout_date > checkin_date:
+            continue
+        candidates.append((checkout_date, r))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda pair: pair[0])
+    return candidates[-1][1]
+
+
+def _sync_previous_departure(property_key, checkin_date, adults, children, exclude_confirmation_code, log):
+    """If some earlier departure's Putzplan row already exists and THIS
+    reservation is (now) its next guest, refresh that row's guest counts
+    and same-day flag. No-op if there's no such row (older/pre-automation
+    data, or nothing preceding). Shared by append_putzplan_row (a new
+    booking might complete an existing row) and the /complete-triggered
+    sync (a reservation's counts becoming known later)."""
+    prev = _find_previous_departure(property_key, checkin_date, exclude_confirmation_code)
+    if prev is None:
+        return
+    prev_checkout = _to_date(prev.get("checkout"))
+    if prev_checkout is None:
+        return
+
+    wohnung = PUTZPLAN_WOHNUNG_LABELS.get(property_key)
+    path = _putzplan_path()
+    if not os.path.exists(path):
+        return
+    target_date_str = format_date_de(prev_checkout)
+
+    backup_file(path)
+    wb = openpyxl.load_workbook(path)
+    ws = wb[PUTZPLAN_SHEET]
+
+    row = _find_row_by_date(ws, wohnung, target_date_str)
+    if row is None:
+        return
+
+    if adults is not None:
+        ws.cell(row=row, column=COL_ERWACHSENE, value=adults)
+    ws.cell(row=row, column=COL_KINDER_U18, value=children or 0)
+    same_day = checkin_date == prev_checkout
+    ws.cell(row=row, column=COL_GLEICHER_TAG, value="Ja" if same_day else "Nein")
+    wb.save(path)
+    log(f"    Putzplan: refreshed row {row} ({wohnung}, {target_date_str}) next-guest counts -> adults={adults}, children={children}")
 
 
 def append_putzplan_row(entry, log=print):
@@ -121,8 +224,20 @@ def append_putzplan_row(entry, log=print):
         log(f"    WARN: Putzplan skipped — file not found at {path}")
         return
 
+    checkin_date = parse_date(entry["checkin"])
     checkout_date = parse_date(entry["checkout"])
-    same_day = _has_same_day_checkin(property_key, checkout_date, entry.get("confirmation_code"))
+    code = entry.get("confirmation_code")
+
+    next_res = _find_next_reservation(property_key, checkout_date, code)
+    if next_res is not None:
+        next_checkin = _to_date(next_res.get("checkin"))
+        same_day = next_checkin == checkout_date
+        next_adults = next_res.get("adults")
+        next_children = next_res.get("children") or 0
+    else:
+        same_day = False
+        next_adults = None
+        next_children = 0
 
     backup_file(path)
     wb = openpyxl.load_workbook(path)
@@ -140,42 +255,46 @@ def append_putzplan_row(entry, log=print):
     ws.cell(row=row, column=COL_TAG, value=WEEKDAYS_DE[checkout_date.weekday()])
     ws.cell(row=row, column=COL_WANN, value=PUTZPLAN_CLEANING_WINDOW)
     ws.cell(row=row, column=COL_GLEICHER_TAG, value="Ja" if same_day else "Nein")
-    if entry.get("adults") is not None:
-        ws.cell(row=row, column=COL_ERWACHSENE, value=entry["adults"])
-    ws.cell(row=row, column=COL_KINDER_U18, value=entry.get("children", 0))
+    if next_adults is not None:
+        ws.cell(row=row, column=COL_ERWACHSENE, value=next_adults)
+    ws.cell(row=row, column=COL_KINDER_U18, value=next_children)
 
     wb.save(path)
-    log(f"    Putzplan: inserted row {row} ({wohnung}, {format_date_de(checkout_date)}, gleicher Tag={same_day})")
+    log(f"    Putzplan: inserted row {row} ({wohnung}, {format_date_de(checkout_date)}), next guests: "
+        f"adults={next_adults}, children={next_children}, gleicher Tag={same_day}")
+
+    # This new reservation might itself be the "next" guest for an
+    # earlier departure whose row already exists.
+    _sync_previous_departure(property_key, checkin_date, entry.get("adults"), entry.get("children", 0), code, log)
 
 
-def _find_matching_row(ws, wohnung, target_date_str, adults, children):
-    """Best-effort match on (Wohnung, Datum, Erwachsene, Kinder unter 18) —
-    the same heuristic Farzaneh already uses by eye, since Putzplan has no
-    confirmation-code column to match on exactly. Shared by
-    flag_putzplan_cancelled and sync_putzplan_guest_counts."""
-    for row in range(2, ws.max_row + 1):
-        if ws.cell(row=row, column=COL_WOHNUNG).value != wohnung:
-            continue
-        if ws.cell(row=row, column=COL_DATUM).value != target_date_str:
-            continue
-        row_adults = ws.cell(row=row, column=COL_ERWACHSENE).value
-        row_children = ws.cell(row=row, column=COL_KINDER_U18).value or 0
-        if row_adults != adults or row_children != (children or 0):
-            continue
-        return row
-    return None
+def sync_putzplan_for_reservation(property_key, checkin_date, adults, children, exclude_confirmation_code, log=print):
+    """Public entry point for xlsx_writer.update_reservation_fields — call
+    when a reservation's adults/children becomes known/changes (e.g. via
+    /complete or a detailed re-import filling in a placeholder), so the
+    PRECEDING departure's Putzplan row (which shows THIS reservation's
+    headcount as its 'next guests') gets refreshed too."""
+    if checkin_date is None:
+        return
+    checkin_date = _to_date(checkin_date) if not isinstance(checkin_date, datetime.date) else checkin_date
+    if checkin_date is None:
+        return
+    _sync_previous_departure(property_key, checkin_date, adults, children, exclude_confirmation_code, log)
 
 
-def sync_putzplan_guest_counts(property_key, checkout_date, old_adults, old_children, new_adults, new_children, log=print):
-    """Called when update_reservation_fields (the /complete form, or a
-    re-import that now has real adults/children where GästeListe only had
-    a placeholder) fills in real guest counts for an existing reservation
-    — confirmed 2026-09-23 that Putzplan rows created earlier from
-    incomplete data (e.g. a booking_simple import with no adults/children)
-    otherwise stay stale forever, since append_putzplan_row only runs once
-    at creation. Matches on the OLD counts (what Putzplan still has),
-    since the new counts are exactly what's changing and can't be part of
-    the match key."""
+def flag_putzplan_cancelled(property_key, checkout_date, log=print):
+    """Marks the matching row (by Wohnung+Datum — see module docstring)
+    'storniert' in column J (Checkin Uhr), reusing the convention already
+    present in the real file (row 5 had this exact value) rather than
+    inventing a new one. Silently does nothing if no matching row is
+    found — this only covers reservations created by this app going
+    forward (2026-09-22 scope decision), so an unmatched cancellation is
+    expected, not an error.
+
+    Known limitation (2026-09-24): if the cancelled reservation was
+    itself some earlier departure's 'next guest', that earlier row's
+    counts are now stale and aren't automatically recomputed — see module
+    docstring."""
     wohnung = PUTZPLAN_WOHNUNG_LABELS.get(property_key)
     if wohnung is None or checkout_date is None:
         return
@@ -190,43 +309,7 @@ def sync_putzplan_guest_counts(property_key, checkout_date, old_adults, old_chil
     wb = openpyxl.load_workbook(path)
     ws = wb[PUTZPLAN_SHEET]
 
-    row = _find_matching_row(ws, wohnung, target_date_str, old_adults, old_children)
-    if row is None:
-        log(f"    Putzplan: no matching row found to sync guest counts ({wohnung}, {target_date_str}) — skipped")
-        return
-
-    if new_adults is not None:
-        ws.cell(row=row, column=COL_ERWACHSENE, value=new_adults)
-    ws.cell(row=row, column=COL_KINDER_U18, value=new_children or 0)
-    wb.save(path)
-    log(f"    Putzplan: synced row {row} guest counts ({wohnung}, {target_date_str}) -> adults={new_adults}, children={new_children}")
-
-
-def flag_putzplan_cancelled(property_key, checkout_date, adults, children, log=print):
-    """Best-effort match on (Wohnung, Datum, Erwachsene, Kinder unter 18) —
-    the same heuristic Farzaneh already uses by eye, since Putzplan has no
-    confirmation-code column to match on exactly. Writes 'storniert' into
-    column J (Checkin Uhr), reusing the convention already present in the
-    real file (row 5 has this exact value) rather than inventing a new
-    one. Silently does nothing if no matching row is found — this only
-    covers reservations created by this app going forward (2026-09-22
-    scope decision), so an unmatched cancellation is expected, not an
-    error."""
-    wohnung = PUTZPLAN_WOHNUNG_LABELS.get(property_key)
-    if wohnung is None or checkout_date is None:
-        return
-
-    path = _putzplan_path()
-    if not os.path.exists(path):
-        return
-
-    target_date_str = format_date_de(checkout_date) if isinstance(checkout_date, datetime.date) else str(checkout_date)
-
-    backup_file(path)
-    wb = openpyxl.load_workbook(path)
-    ws = wb[PUTZPLAN_SHEET]
-
-    row = _find_matching_row(ws, wohnung, target_date_str, adults, children)
+    row = _find_row_by_date(ws, wohnung, target_date_str)
     if row is None:
         log(f"    Putzplan: no matching row found to flag cancelled ({wohnung}, {target_date_str}) — skipped")
         return

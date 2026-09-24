@@ -211,7 +211,17 @@ def parse_airbnb_csv(path):
     Servicegebühr = total platform fee (incl. VAT), Reinigungsgebühr =
     cleaning fee charged to guest. guest_paid_total is reconstructed as
     Betrag + Servicegebühr (verified to match exactly: 168.81 + 38.19 =
-    207.00 against the real screenshot)."""
+    207.00 against the real screenshot) — this needs the GROSS
+    Servicegebühr, since the guest pays the gross amount.
+
+    platform_fee_total (which feeds AA/Nettobetrag in xlsx_writer) is
+    different: confirmed by Farzaneh 2026-09-24 that Servicegebühr is
+    ALWAYS gross (incl. 19% VAT) — writing it straight into AA made
+    xlsx_writer's own AB formula (=AA*0.19) double-charge the VAT that
+    was already baked in (e.g. a real row: Servicegebühr 30.81 was
+    written to AA, when the correct net figure is 30.81/1.19 = 25.89).
+    So platform_fee_total is divided by 1.19 here; guest_paid_total above
+    still uses the raw (gross) Servicegebühr, deliberately."""
     reservations = []
     for row in _read_text_rows(path):
         if row.get("Typ", "").strip() != "Buchung":
@@ -229,10 +239,11 @@ def parse_airbnb_csv(path):
             continue
         guest_name = row.get("Gast", "").strip() or guest_placeholder(code)
         host_payout = _parse_money(row.get("Betrag"))
-        platform_fee_total = _parse_money(row.get("Servicegebühr"))
+        platform_fee_gross = _parse_money(row.get("Servicegebühr"))
+        platform_fee_total = round(platform_fee_gross / 1.19, 2) if platform_fee_gross is not None else None
         guest_paid_total = None
-        if host_payout is not None and platform_fee_total is not None:
-            guest_paid_total = round(host_payout + platform_fee_total, 2)
+        if host_payout is not None and platform_fee_gross is not None:
+            guest_paid_total = round(host_payout + platform_fee_gross, 2)
         reservations.append({
             "property": property_key,
             "platform": "Airbnb",

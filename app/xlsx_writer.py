@@ -367,9 +367,13 @@ def apply_cancellation(wb, header_map_cache, entry, log=print):
         checkout_col = header_map.get(FIELD_HEADERS["checkout"])
         if code_col is None or flag_col is None:
             continue
-        row = 1
-        while ws.cell(row=row + 1, column=1).value not in (None, ""):
-            row += 1
+        # Scan every row up to the sheet's real extent — NOT "stop at the
+        # first blank column-A cell" (that pattern is deliberate in
+        # last_used_row, for finding an APPEND spot, but wrong here: a
+        # manually-deleted-cell gap row would make every reservation
+        # after it unreachable and silently "not found". Found 2026-09-24
+        # when a real cancellation/update past such a gap failed.
+        for row in range(2, ws.max_row + 1):
             cell_val = ws.cell(row=row, column=code_col + 1).value
             if str(cell_val).strip() == code:
                 ws.cell(row=row, column=flag_col + 1, value="ja")
@@ -490,9 +494,11 @@ def update_reservation_fields(property_key, confirmation_code, updates: dict, lo
         children_col = header_map.get(FIELD_HEADERS["children"])
         if code_col is None:
             continue
-        row = 1
-        while ws.cell(row=row + 1, column=1).value not in (None, ""):
-            row += 1
+        # Scan every row up to the sheet's real extent, not "stop at the
+        # first blank column-A cell" — see apply_cancellation for why
+        # (a manually-deleted-cell gap row made rows after it
+        # unreachable; found 2026-09-24 on a real row).
+        for row in range(2, ws.max_row + 1):
             if str(ws.cell(row=row, column=code_col + 1).value).strip() == code:
                 checkin_value = ws.cell(row=row, column=checkin_col + 1).value if checkin_col is not None else None
                 for field_key, value in updates.items():

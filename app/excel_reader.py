@@ -68,6 +68,16 @@ def _row_to_reservation(row, header_map, property_key, sheet_name):
     guest_name = get("guest_name")
     if not guest_name:
         return None
+    # A real reservation always has both dates. The Muster sheet has a
+    # tax-summary block (Umsatzsteuerrechnung) sitting below the real
+    # reservations, with row labels like "Zu Zahlende Betrag an dem
+    # Behörden" in the same column as Gast Name and no dates — without
+    # this check, those got misread as fake reservations with no
+    # checkin/checkout, inflating /reservations and find_incomplete_
+    # reservations (found 2026-09-24, e.g. "155 Reservierungen" for
+    # Karlstraße when the real count is far lower).
+    if not get("checkin") or not get("checkout"):
+        return None
 
     reservation = {"property": property_key, "sheet": sheet_name}
     for field_key in FIELD_HEADERS:

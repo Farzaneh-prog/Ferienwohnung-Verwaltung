@@ -1,0 +1,14 @@
+.git
+.env
+.env.example
+__pycache__/
+*.pyc
+.venv/
+venv/
+backups/
+data/
+GästeListe_*.xlsx
+Putzplan*.xlsx
+docs/
+wordpress-plugin/
+sample_data/

@@ -1,0 +1,13 @@
+services:
+  ferienwohnung:
+    build: .
+    container_name: ferienwohnung-automat
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - /share/Ferienwohnung-Data:/data
+    env_file:
+      - .env
+    environment:
+      - DATA_DIR=/data

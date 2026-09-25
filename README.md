@@ -82,6 +82,8 @@ tools/
 sample_data/               Fake-Demo-Dateien (Struktur wie echte Dateien)
 wordpress-plugin/          Nicht mehr benutzter Eingangs-Briefkasten (siehe oben)
 docs/STATUS.md              Laufend gepflegter Übergabe-/Entscheidungs-Stand
+Dockerfile, docker-compose.yml, wsgi.py, .dockerignore
+                            Für den Dauerbetrieb auf dem QNAP-NAS (siehe unten)
 ```
 
 ## Setup
@@ -106,6 +108,40 @@ python run.py
 ```
 
 Dann `http://127.0.0.1:5000` öffnen und einloggen.
+
+## Dauerbetrieb auf dem QNAP-NAS (seit 2026-09-25)
+
+Die App läuft nicht mehr nur lokal auf Farzanehs Rechner, sondern dauerhaft
+(24/7) als Docker-Container auf ihrem eigenen QNAP-NAS (TS-431P2, ARM) —
+öffentlich erreichbar unter `https://farzaneh-nas.myqnapcloud.com:4844/`
+(DDNS + Let's-Encrypt-Zertifikat + Fritz!Box-Portfreigabe + QNAP
+Reverse-Proxy). Grund: Phasen 2–4 unten brauchen einen Server, der auch
+erreichbar ist, wenn Farzanehs Laptop aus ist (z.B. auf Reise, nur Handy
+dabei). Die echten Excel-Dateien liegen dabei weiterhin nur auf der
+eigenen Hardware (NAS-Freigabeordner `Ferienwohnung-Data`, in den
+Container als `/data` gemountet) — nicht bei einem fremden Hosting-Anbieter.
+
+Produktions-Entrypoint ist `wsgi.py` (nutzt `waitress`, **kein**
+`debug=True` wie `run.py` — der Werkzeug-Debugger wäre bei einer öffentlich
+erreichbaren App ein Sicherheitsrisiko).
+
+Der Code liegt auf dem NAS unter `/share/CACHEDEV1_DATA/ferienwohnung-app`
+(per `scp`/tar kopiert, **nicht** per `git clone` — auf dem NAS ist kein
+Git installiert). Nach jeder Code-Änderung muss der Ordner neu übertragen
+und der Container neu gebaut werden:
+
+```bash
+# lokal
+DOCKER=/share/CACHEDEV1_DATA/.qpkg/container-station/bin/docker
+# via ssh admin@192.168.178.21 (SSH-Key liegt unter ~/.ssh/id_ed25519_qnap):
+export DOCKER_HOST=unix:///var/run/system-docker.sock
+cd /share/CACHEDEV1_DATA/ferienwohnung-app
+$DOCKER compose up -d --build
+```
+
+Volle Details (Netzwerk-Setup, SSH-Key-Einrichtung, der `$`-Escaping-Stolperstein
+in `.env` für Docker Compose, warum Reverse-Proxy Port 8443 statt 443 nutzt)
+stehen in `docs/STATUS.md`, Abschnitt 12.
 
 ## Demo-Daten
 
@@ -146,16 +182,18 @@ Skript-Docstring). Backups der Originaldateien vor dem Schrumpfen liegen in
   "kein Wert übergeben". Zum Leeren einer Zelle immer `cell.value = None` direkt
   setzen.
 
-## Nächste Phasen (Stand 2026-09-24, siehe docs/STATUS.md Abschnitt 10)
+## Nächste Phasen (Stand 2026-09-25, siehe docs/STATUS.md Abschnitt 10 & 12)
 
 1. **Passendes Frontend** — die aktuelle Oberfläche ist bewusst minimal und war nur
    zum Testen gedacht.
 2. **Erinnerung einen Tag vor Gästeankunft** an Farzaneh selbst.
 3. **WhatsApp-Koordination der Putzkräfte** (Twilio) — Rotations-/Eskalations-Logik
-   ist bereits dokumentiert, braucht aber noch eine Hosting-Entscheidung (öffentlich
-   erreichbarer Webhook) und einen Verfügbarkeits-Kalender der Putzkräfte.
+   ist bereits dokumentiert, braucht noch einen Verfügbarkeits-Kalender der
+   Putzkräfte.
 4. **Automatisches Eintragen von Putzkraft-Name und -Preis** in die Excel-Datei,
    sobald eine Reinigung über WhatsApp bestätigt wurde.
 
-Phasen 2–4 hängen alle an derselben Hosting-Entscheidung — sinnvoll, die einmal
-gemeinsam zu treffen statt dreimal einzeln.
+Die Hosting-Entscheidung, an der Phasen 2–4 vorher hingen (ein öffentlich
+erreichbarer, dauerhaft laufender Server), ist am 2026-09-25 gefallen und
+umgesetzt (QNAP-NAS, siehe Abschnitt "Dauerbetrieb" oben) — diese drei Phasen
+sind also jetzt infrastrukturell nicht mehr blockiert.

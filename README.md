@@ -189,43 +189,60 @@ echten Alarm auslöst (kein Push-Dienst, kein Twilio nötig).
   eine Erinnerung fällig war), bleibt die Mail ganz aus — es gibt dann
   nichts zu löschen.
 
-## WhatsApp-Koordination der Putzkräfte — Stage 1 (seit 2026-10-01)
+## WhatsApp-Koordination der Putzkräfte (seit 2026-10-01)
 
-Eskalationslogik, echter WhatsApp-Versand über Twilio und ein Webhook für
-die Antworten der Putzkräfte — ein letzter End-to-End-Test der
-Bestätigungs-Rückschreibung steht noch aus, siehe `docs/STATUS.md`
-Abschnitt 15 für den genauen Stand und die nächsten Schritte.
+Vollständig gebaut und live getestet (Twilio-Sandbox, Testrollen auf Farzanehs
+Telefon); läuft auf dem NAS im **Trockenlauf** (nur Log), bis die eigene
+WhatsApp-Nummer und die Vorlagen freigegeben sind. Stand, Entscheidungen und
+die Schritte bis zum Live-Gang: `docs/STATUS.md` Abschnitte 15–18.
 
-- `app/cleaner_roster.py` — Liste der Putzkräfte (Name, WhatsApp-Nummer,
-  Objekte, verfügbare Wochentage, Stundensatz, Vertragsende, Prioritäts-
-  Stufe) in `data/cleaners.json` (gitignored, auf NAS und lokal synchron
-  gehalten). Wird beim ersten Aufruf mit den in
-  `نظافتچی_ها-و-فرمول_های-مالی.md` bestätigten Werten befüllt — die
-  WhatsApp-Nummern aller 5 Putzkräfte sind inzwischen eingetragen.
-- `app/cleaner_coordination.py` — die Eskalationslogik
-  (`decide_next_action`): wer als Nächstes angeschrieben werden sollte,
-  basierend auf Tagen bis zur Abreise, wer schon versucht wurde, der
-  gerechten Jennifer/Mehrnaz-Rotation, und einer Ruhezeit (keine Nachricht
-  22:00–08:00 Europe/Berlin — eine verspätete Entscheidung wird einfach
-  bis 08:00 zurückgehalten, nicht separat nachgeholt). `confirm_cleaner`
-  schreibt eine Bestätigung sofort in die passende Putzplan-Zeile
-  (Spalte A, über `app/putzplan_writer.assign_cleaner`).
-- `app/whatsapp_sender.py` — dünner Twilio-Wrapper. Business-initiierte
-  Erstkontakte MÜSSEN ein genehmigtes Content Template verwenden (freier
-  Text funktioniert nur als Antwort innerhalb eines bereits offenen
-  24-Stunden-Fensters) — `send_cleaner_request` nutzt ein Template mit
-  drei Quick-Reply-Buttons (Ja/Nein/Vielleicht).
-- `app/whatsapp_webhook.py` — empfängt Twilios Eingangs-Webhook
-  (`/webhooks/whatsapp`), prüft die Twilio-Signatur, findet die
-  passende offene Putzplan-Zeile für den Antwortenden und bestätigt sie
-  bei "Ja". Muss öffentlich erreichbar sein (läuft nur auf dem NAS, nicht
-  lokal) — als Sandbox-Webhook-URL in der Twilio Console eingetragen.
-- `python -m app.cleaner_coordination` — Trockenlauf (dry-run, Standard)
-  gegen die echten, noch offenen Putzplan-Zeilen: loggt nur, was
-  passieren WÜRDE. `dry_run=False` verschickt echte Nachrichten.
-- State (wer wann angeschrieben wurde, Rotations-Merker, Urlaubswochen,
-  Bestätigungen) liegt in `data/cleaner_coordination_state.json`
-  (gitignored).
+**Ablauf:** > 10 Tage vor Abreise nichts Automatisches; ab 10 Tagen wird die
+Prioritätskette nacheinander angeschrieben (Jennifer/Mehrnaz fair im Wechsel →
+Manuela → Tahmine → Ramic, je nach Objekt/Wochentag/Vertrag/Urlaub); ab 3 Tagen
+geht ein "dringend"-Broadcast an alle noch Infrage-Kommenden. Ja bestätigt
+(Putzplan Spalte A, Vorname wie in der echten Datei), Nein/Vielleicht/1 h ohne
+Antwort → sofort die nächste Person. Antworten sind jederzeit änderbar; ein
+"Ja" auf eine schon vergebene Reinigung wird **Reserve**, springt die bestätigte
+Person ab, rückt die erste Reserve nach (sonst wird neu angefragt + Alarm).
+Keine Nachricht zwischen 22:00 und 08:00 (Ausnahme: Stornierung nach 19:00 am
+Vorabend).
+
+- `app/cleaner_roster.py` — Putzkräfte in `data/cleaners.json` (gitignored):
+  Name, WhatsApp-Nummer, Objekte, Wochentage, Satz, Vertragsende, Prioritäts-
+  Stufe, `sheet_name` (so steht die Person in Putzplan-Spalte A);
+  `match_cleaner` ordnet Freitext-Werte zu ("ich", Notizen → keine Person).
+- `app/cleaner_coordination.py` — Entscheidungslogik, Antworten, Reserve,
+  Zeilenstatus; State in `data/cleaner_coordination_state.json`.
+  Urlaub: **hart** (unterwegs, wird nie angeschrieben) oder **weich** (freie
+  Woche, ganz ans Kettenende) — Pflege über die Dashboard-Seite `/leave`.
+- `app/day_before.py` — 16:00 Erinnerung am Vortag (inkl. nächste Gäste:
+  Erwachsene, Kinder < 18, Kinder < 3 aus Spalte I), Stornierungen
+  (Putzplan-Zeile bleibt, Spalte A merkt die zuständige Person; 19:00
+  "entfällt"), Ersatzbuchung (gleiche Person zuerst), Vertragsende-Warnung.
+- `app/scheduler.py` — ereignisgesteuert statt Dauer-Polling: Import /
+  manuelle Suche / Stornierung lösen sofort eine Prüfung aus; Einmal-Timer für
+  "1 h ohne Antwort" und "08:00 nach der Ruhezeit"; Tagesjobs 16:00 und 19:00.
+  `SCHEDULER_ENABLED` (Standard aus) und `SCHEDULER_DRY_RUN` (Standard an).
+- `app/clock_guard.py` — vergleicht die Systemuhr mit mehreren Webservern;
+  > 15 min Abweichung → Warnung (WhatsApp an Farzaneh) und im Live-Modus keine
+  Nachrichten.
+- `app/whatsapp_sender.py` / `tools/setup_whatsapp_templates.py` /
+  `tools/submit_whatsapp_templates.py` — Twilio-Wrapper; alle
+  business-initiierten Nachrichten nutzen deutsche Content Templates
+  (müssen für den echten Absender von WhatsApp freigegeben werden).
+- `app/whatsapp_webhook.py` — Eingangs-Webhook (`/webhooks/whatsapp`,
+  Signaturprüfung gegen `TWILIO_WEBHOOK_URL`); antwortet der Putzkraft sofort
+  auf Deutsch, leitet Freitext an Farzaneh weiter (Sprachnachrichten nur als
+  Hinweis).
+- `app/owner_alerts.py` — kurze Zeile an Farzaneh für jede Nachricht/Antwort
+  und alle Alarme (`OWNER_WHATSAPP_NUMBER`).
+- Dashboard "Putz-Alerts": Datum eintragen und "Suche starten", Statuszeile je
+  Eintrag, Formular "Stornierung melden"; `/leave` für Urlaub.
+- Test- und Sicherheitsmodus: `SCHEDULER_ONLY_CLEANERS=test1,test2` +
+  `COORDINATION_COOLDOWN_MINUTES` — nur Testrollen und Testzeilen, echte
+  Putzplan-Zeilen/Putzkräfte bleiben unberührt.
+- Excel-Dateien werden **atomar** gespeichert (`save_workbook_atomic`), der
+  Import-Bestätigungsschritt überspringt schon vorhandene Buchungen.
 
 ## Demo-Daten
 
@@ -272,14 +289,12 @@ Skript-Docstring). Backups der Originaldateien vor dem Schrumpfen liegen in
    zum Testen gedacht.
 2. ~~**Erinnerung einen Tag vor Gästeankunft** an Farzaneh selbst.~~ **Erledigt
    (2026-09-25)** — siehe Abschnitt "Check-in-Erinnerung per E-Mail" oben.
-3. **WhatsApp-Koordination der Putzkräfte** (Twilio) — **Stage 1 gebaut
-   (2026-10-01):** echter Versand über ein genehmigtes Content Template
-   (Quick-Reply-Buttons Ja/Nein/Vielleicht) plus ein öffentlich
-   erreichbarer Webhook, der eine "Ja"-Antwort direkt in die passende
-   Putzplan-Zeile schreibt — beides auf dem NAS deployed und das
-   Twilio-Sandbox-Webhook ist eingetragen. Ein letzter End-to-End-Test der
-   kompletten Antwort-Kette fehlt noch (nächster Schritt). Siehe
-   `docs/STATUS.md` Abschnitt 15.
+3. **WhatsApp-Koordination der Putzkräfte** (Twilio) — **gebaut und getestet
+   (2026-10-01)**, Scheduler im Trockenlauf. Fehlt bis zum Live-Gang: Freigabe
+   der 9 Vorlagen für die eigene Nummer (die neue Nummer, siehe `.env` auf dem NAS, als WhatsApp-Sender
+   registriert, Status Online), Umstellen von `TWILIO_WHATSAPP_FROM`, ein kurzer
+   Echt-Test und die Entscheidung `SCHEDULER_DRY_RUN=0`. Siehe `docs/STATUS.md`
+   Abschnitt 18.
 4. ~~**Automatisches Eintragen von Putzkraft-Name** in die Excel-Datei,
    sobald eine Reinigung über WhatsApp bestätigt wurde.~~ **Im Rahmen von
    Stage 1 miterledigt** (`app/putzplan_writer.assign_cleaner`) — nur das

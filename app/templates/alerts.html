@@ -17,12 +17,16 @@
     .alert-card .info b { display: block; }
     .alert-card .info span { color: #9fb0cf; font-size: 0.85rem; }
     .resolve { background: transparent; border: 1px solid #f4b400; color: #f4b400; padding: 0.4rem 0.8rem; border-radius: 6px; font-size: 0.85rem; }
+    .info-box { background: #1c4a2b; color: #b4ffc2; padding: 0.6rem 1rem; border-radius: 6px; margin: 0.6rem 0; }
+    .status { color: #f4b400; font-size: 0.85rem; }
     .empty { color: #9fb0cf; text-align: center; padding: 1.5rem; }
   </style>
 </head>
 <body>
   <h1>هشدار سریع نظافتچی</h1>
-  <nav><a href="{{ url_for('main.reservations') }}">رزروها</a><a href="{{ url_for('workflow.import_form') }}">آپلود</a><a href="{{ url_for('workflow.complete_list') }}">تکمیل اطلاعات</a></nav>
+  <nav><a href="{{ url_for('main.reservations') }}">رزروها</a><a href="{{ url_for('workflow.import_form') }}">آپلود</a><a href="{{ url_for('workflow.complete_list') }}">تکمیل اطلاعات</a><a href="{{ url_for('workflow.leave_list') }}">مرخصی</a></nav>
+  {% for msg in get_flashed_messages() %}<div class="info-box">{{ msg }}</div>{% endfor %}
+  <p class="empty" style="padding:0.3rem">{% if not automation_on %}اتوماسیون واتساپ خاموش است{% elif dry_run %}اتوماسیون روشن، حالت آزمایشی (فقط لاگ){% else %}اتوماسیون واتساپ روشن است{% endif %}</p>
 
   <div class="add-card">
     <form method="post" action="{{ url_for('workflow.alerts_add') }}">
@@ -42,7 +46,26 @@
         <label>یادداشت (اختیاری)</label>
         <input type="text" name="note" placeholder="مثلاً: بوک جدید، هنوز کامل وارد نشده">
       </div>
-      <button type="submit">ثبت سریع</button>
+      <button type="submit">ثبت و شروع جستجوی نظافتچی</button>
+    </form>
+  </div>
+
+  <div class="add-card">
+    <b>اعلام کنسلی</b>
+    <form method="post" action="{{ url_for('workflow.cancellation_report') }}">
+      <div>
+        <label>ملک</label>
+        <select name="property">
+          {% for key, label in property_labels.items() %}
+            <option value="{{ key }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label>تاریخ خروج (Abreise) رزروِ کنسل‌شده</label>
+        <input type="date" name="date" required>
+      </div>
+      <button type="submit">کنسل شد</button>
     </form>
   </div>
 
@@ -54,6 +77,7 @@
       <div class="info">
         <b>{{ property_labels.get(a.property, a.property) }} — {{ a.date }}</b>
         <span>{{ a.note or '—' }}</span>
+        <span class="status">{{ statuses.get(a.id, '') }}</span>
       </div>
       <form method="post" action="{{ url_for('workflow.alerts_resolve', alert_id=a.id) }}">
         <button class="resolve" type="submit">انجام شد</button>

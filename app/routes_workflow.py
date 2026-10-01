@@ -4,6 +4,7 @@ form, and the quick cleaner-heads-up alert list. See app/import_parser.py
 and app/xlsx_writer.py for the underlying logic — this file is just the web
 glue (upload, preview, confirm) around it.
 """
+import datetime
 import json
 import os
 import uuid
@@ -16,6 +17,8 @@ from .excel_reader import get_existing_confirmation_codes, find_incomplete_reser
 from .import_parser import detect_and_parse, merge_reservation_entries
 from .quick_alerts import list_alerts, add_alert, resolve_alert
 from .xlsx_writer import process_batch, update_reservation_fields
+from . import cleaner_coordination as cc, day_before, putzplan_writer, scheduler
+from .cleaner_roster import load_roster
 
 bp = Blueprint("workflow", __name__)
 
@@ -106,8 +109,21 @@ def import_confirm():
         batch = json.load(fh)
 
     log_lines = []
-    result = process_batch(batch["new_reservations"], batch["cancellations"], log=log_lines.append)
+    # Confirm may run twice for the same preview (double click, retry after an
+    # error) — never append a reservation whose code is already in the file.
+    existing = {}
+    fresh = []
+    for r in batch["new_reservations"]:
+        prop = r["property"]
+        if prop not in existing:
+            existing[prop] = get_existing_confirmation_codes(prop)
+        if str(r.get("confirmation_code", "")).strip() in existing[prop]:
+            log_lines.append(f"    skipped duplicate {r.get('confirmation_code')} ({prop}): already in the file")
+        else:
+            fresh.append(r)
+    result = process_batch(fresh, batch["cancellations"], log=log_lines.append)
     os.remove(staging_path)
+    scheduler.trigger_check("import")  # new/cancelled bookings -> look for cleaners right away
 
     return render_template(
         "import_result.html",
@@ -152,11 +168,33 @@ def complete_submit(property_key, code):
 
 
 # ---------------------------------------------------------------- alerts ---
+# "Putz-Alerts": heads-up for a date + manual "find a cleaner" trigger,
+# cancellation reporting, and leave (Urlaub) — all feed cleaner_coordination.
+
+def _parse_form_date(value):
+    try:
+        return datetime.date.fromisoformat((value or "").strip())
+    except ValueError:
+        return None
+
 
 @bp.route("/alerts", methods=["GET"])
 @login_required
 def alerts_list():
-    return render_template("alerts.html", alerts=list_alerts(), property_labels=PROPERTY_LABELS)
+    alerts = list_alerts()
+    roster, state = load_roster(), cc._load_state()
+    statuses = {}
+    for a in alerts:
+        d = _parse_form_date(a.get("date"))
+        if d is None:
+            continue
+        status = cc.row_status(a["property"], d, roster, state)
+        code = putzplan_writer.get_assigned_code(a["property"], d)
+        if code and status in ("noch nicht gestartet",):
+            status = f"im Putzplan eingetragen: {code}"
+        statuses[a["id"]] = status
+    return render_template("alerts.html", alerts=alerts, statuses=statuses, property_labels=PROPERTY_LABELS,
+                           automation_on=scheduler.is_enabled(), dry_run=scheduler.is_dry_run())
 
 
 @bp.route("/alerts", methods=["POST"])
@@ -165,8 +203,15 @@ def alerts_add():
     property_key = request.form.get("property")
     date_str = request.form.get("date", "").strip()
     note = request.form.get("note", "").strip()
-    if property_key in PROPERTY_LABELS and date_str:
+    d = _parse_form_date(date_str)
+    if property_key in PROPERTY_LABELS and d:
         add_alert(property_key, date_str, note)
+        if scheduler.is_enabled():
+            try:
+                cc.start_manual_search(property_key, d, dry_run=scheduler.is_dry_run())
+                flash("Suche nach Putzkraft gestartet." if not scheduler.is_dry_run() else "Dry-Run: Suche würde starten.")
+            except Exception as exc:  # noqa: BLE001
+                flash(f"Suche konnte nicht gestartet werden: {exc}")
     return redirect(url_for("workflow.alerts_list"))
 
 
@@ -175,3 +220,60 @@ def alerts_add():
 def alerts_resolve(alert_id):
     resolve_alert(alert_id)
     return redirect(url_for("workflow.alerts_list"))
+
+
+@bp.route("/alerts/cancel", methods=["POST"])
+@login_required
+def cancellation_report():
+    """Owner reports a cancelled date by hand (before/without an import)."""
+    property_key = request.form.get("property")
+    d = _parse_form_date(request.form.get("date"))
+    if property_key in PROPERTY_LABELS and d:
+        flagged = putzplan_writer.flag_putzplan_cancelled(property_key, d)
+        if flagged is None:
+            flash("Kein passender Putzplan-Eintrag gefunden — nichts geändert.")
+        else:
+            day_before.on_cancellation(property_key, d, flagged.get("cleaner_code"))
+            flash("Stornierung eingetragen.")
+    return redirect(url_for("workflow.alerts_list"))
+
+
+# ----------------------------------------------------------------- leave ---
+
+@bp.route("/leave", methods=["GET"])
+@login_required
+def leave_list():
+    state = cc._load_state()
+    return render_template("leave.html", roster=load_roster(), hard=state.get("leave_weeks", {}),
+                           soft=state.get("soft_weeks", {}))
+
+
+@bp.route("/leave/add", methods=["POST"])
+@login_required
+def leave_add():
+    cid = request.form.get("cleaner")
+    kind = "soft_weeks" if request.form.get("kind") == "soft" else "leave_weeks"
+    start, end = _parse_form_date(request.form.get("start")), _parse_form_date(request.form.get("end"))
+    if cid in load_roster() and start and end and start <= end:
+        with cc.STATE_LOCK:
+            state = cc._load_state()
+            state.setdefault(kind, {}).setdefault(cid, []).append([start.isoformat(), end.isoformat()])
+            cc._save_state(state)
+    else:
+        flash("Ungültige Eingabe (Person oder Datum).")
+    return redirect(url_for("workflow.leave_list"))
+
+
+@bp.route("/leave/delete", methods=["POST"])
+@login_required
+def leave_delete():
+    cid, kind = request.form.get("cleaner"), request.form.get("kind")
+    if kind in ("leave_weeks", "soft_weeks"):
+        with cc.STATE_LOCK:
+            state = cc._load_state()
+            ranges = state.get(kind, {}).get(cid, [])
+            idx = int(request.form.get("index", -1))
+            if 0 <= idx < len(ranges):
+                ranges.pop(idx)
+                cc._save_state(state)
+    return redirect(url_for("workflow.leave_list"))

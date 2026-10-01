@@ -17,4 +17,7 @@ def create_app():
     app.register_blueprint(bp)
     app.register_blueprint(workflow_bp)
     app.register_blueprint(whatsapp_webhook_bp)
+
+    from .scheduler import start_scheduler
+    start_scheduler()
     return app

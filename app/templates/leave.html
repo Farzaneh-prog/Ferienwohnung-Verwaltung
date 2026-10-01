@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>مرخصی نظافتچی‌ها</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #0f2143; color: #f5f4f0; margin: 0; padding: 1rem; }
+    h1 { font-size: 1.15rem; }
+    nav a { color: #f4b400; text-decoration: none; font-size: 0.85rem; margin-inline-end: 1rem; }
+    .card { background: #16294f; border-radius: 10px; padding: 1rem; margin: 1rem 0; }
+    form.add { display: grid; gap: 0.5rem; }
+    label { font-size: 0.8rem; color: #9fb0cf; }
+    input, select { width: 100%; box-sizing: border-box; padding: 0.6rem; border-radius: 6px; border: 1px solid #3a4a6b; background: #0f2143; color: #fff; font-size: 1rem; }
+    button { padding: 0.6rem 1rem; border: none; border-radius: 6px; background: #f4b400; color: #0f2143; font-weight: 600; cursor: pointer; }
+    .row { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; padding: 0.4rem 0; border-top: 1px solid #243a68; }
+    .del { background: transparent; border: 1px solid #f4b400; color: #f4b400; padding: 0.3rem 0.7rem; font-size: 0.8rem; }
+    .hint { color: #9fb0cf; font-size: 0.8rem; }
+    .flash { background: #4a1f2b; color: #ffb4c2; padding: 0.6rem 1rem; border-radius: 6px; margin: 0.6rem 0; }
+  </style>
+</head>
+<body>
+  <h1>مرخصی / غیبت نظافتچی‌ها</h1>
+  <nav><a href="{{ url_for('main.reservations') }}">رزروها</a><a href="{{ url_for('workflow.alerts_list') }}">Putz-Alerts</a></nav>
+  {% for msg in get_flashed_messages() %}<div class="flash">{{ msg }}</div>{% endfor %}
+
+  <div class="card">
+    <form class="add" method="post" action="{{ url_for('workflow.leave_add') }}">
+      <div>
+        <label>نظافتچی</label>
+        <select name="cleaner">
+          {% for cid, c in roster.items() %}<option value="{{ cid }}">{{ c.name }}</option>{% endfor %}
+        </select>
+      </div>
+      <div>
+        <label>نوع</label>
+        <select name="kind">
+          <option value="hard">سفر / در دسترس نیست (هرگز پیام نمی‌گیرد)</option>
+          <option value="soft">هفته‌ی خالی ماهانه (آخر زنجیره، فقط اگر کسی نبود)</option>
+        </select>
+      </div>
+      <div><label>از (شامل)</label><input type="date" name="start" required></div>
+      <div><label>تا (شامل)</label><input type="date" name="end" required></div>
+      <button type="submit">ثبت</button>
+    </form>
+  </div>
+
+  {% for cid, c in roster.items() %}
+    {% if hard.get(cid) or soft.get(cid) %}
+      <div class="card">
+        <b>{{ c.name }}</b>
+        {% for kind, label, data in [('leave_weeks', 'در دسترس نیست', hard), ('soft_weeks', 'هفته‌ی خالی', soft)] %}
+          {% for r in data.get(cid, []) %}
+            <div class="row">
+              <span>{{ label }}: {{ r[0] }} → {{ r[1] }}</span>
+              <form method="post" action="{{ url_for('workflow.leave_delete') }}">
+                <input type="hidden" name="cleaner" value="{{ cid }}">
+                <input type="hidden" name="kind" value="{{ kind }}">
+                <input type="hidden" name="index" value="{{ loop.index0 }}">
+                <button class="del" type="submit">حذف</button>
+              </form>
+            </div>
+          {% endfor %}
+        {% endfor %}
+      </div>
+    {% endif %}
+  {% endfor %}
+  <p class="hint">مرخصی سخت: آن شخص اصلاً در زنجیره و broadcast نیست. هفته‌ی خالی: اولویتش پایین می‌آید ولی اگر کسی دیگر نبود از او استفاده می‌شود.</p>
+</body>
+</html>

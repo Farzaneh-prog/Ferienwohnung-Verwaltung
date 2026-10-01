@@ -42,6 +42,19 @@ TWILIO_CLEANER_TEMPLATE_SID = os.environ.get(
     "TWILIO_CLEANER_TEMPLATE_SID", "HX8953397e888345beaba2f36eb5f150d9"
 )
 
+# Other German templates (created by tools/setup_whatsapp_templates.py,
+# 2026-10-01). Same story as above: SIDs aren't secret, env can override.
+TEMPLATE_SIDS = {
+    "reminder_open": os.environ.get("TWILIO_TEMPLATE_REMINDER_OPEN", "HX96afc7964e8d69ad98ed4718f59d190c"),
+    "urgent": os.environ.get("TWILIO_TEMPLATE_URGENT", "HXb5aad2c56e82bc85cd776ae00921c63e"),
+    "taken": os.environ.get("TWILIO_TEMPLATE_TAKEN", "HX5abcf216022453b9e3c49c34c64e7294"),
+    "promoted": os.environ.get("TWILIO_TEMPLATE_PROMOTED", "HXfc63f7d3907315836ef1338384e7665a"),
+    "cancelled": os.environ.get("TWILIO_TEMPLATE_CANCELLED", "HX7b83ed2555eb8c5ac2b480b3126045a7"),
+    "reminder_tomorrow": os.environ.get("TWILIO_TEMPLATE_REMINDER_TOMORROW", "HX9d7447ca4372c3ec648ede6e3dded71e"),
+    "again": os.environ.get("TWILIO_TEMPLATE_AGAIN", "HXb5e8f2515c41bdd68e5a5b7347fd4f93"),
+    "owner_notice": os.environ.get("TWILIO_TEMPLATE_OWNER_NOTICE", "HX825046c3748afed5a8097655a44467ac"),
+}
+
 _client = None
 
 
@@ -71,6 +84,21 @@ def send_cleaner_request(to_number: str, name: str, date_str: str, property_labe
         to=f"whatsapp:{to_number}",
         content_sid=TWILIO_CLEANER_TEMPLATE_SID,
         content_variables=json.dumps({"1": name, "2": date_str, "3": property_label}),
+    )
+    return message.sid
+
+
+def send_template(to_number: str, template: str, variables: dict) -> str:
+    """Sends one of TEMPLATE_SIDS' templates (key in `template`) with
+    `variables` ({"1": ..., "2": ...}). Raises on failure, like the
+    other senders here."""
+    import json
+
+    message = _get_client().messages.create(
+        from_=f"whatsapp:{TWILIO_WHATSAPP_FROM}",
+        to=f"whatsapp:{to_number}",
+        content_sid=TEMPLATE_SIDS[template],
+        content_variables=json.dumps(variables),
     )
     return message.sid
 

@@ -64,7 +64,7 @@ from .config import (
     PUTZPLAN_CLEANING_WINDOW,
 )
 from .excel_reader import load_reservations
-from .xlsx_writer import WEEKDAYS_DE, backup_file, format_date_de, parse_date
+from .xlsx_writer import WEEKDAYS_DE, backup_file, format_date_de, parse_date, save_workbook_atomic
 
 COL_WER = 1
 COL_WOHNUNG = 2
@@ -151,14 +151,21 @@ def _find_insert_row(ws, target_date):
     return last_dated_row + 1
 
 
-def _find_row_by_date(ws, wohnung, target_date_str):
-    """(Wohnung, Datum) is unique — see module docstring."""
+def _find_row_by_date(ws, wohnung, target_date_str, storniert=False):
+    """Row for (Wohnung, Datum). Normally unique — see module docstring —
+    except after a cancellation + replacement booking for the same day, but
+    append_putzplan_row revives the storniert row in that case instead of
+    inserting a second one, so there is still at most one. storniert=False
+    (default) skips rows flagged 'storniert'; storniert=True looks for
+    exactly those."""
     for row in range(2, ws.max_row + 1):
         if ws.cell(row=row, column=COL_WOHNUNG).value != wohnung:
             continue
         if ws.cell(row=row, column=COL_DATUM).value != target_date_str:
             continue
-        return row
+        is_storniert = str(ws.cell(row=row, column=COL_CHECKIN_UHR).value or "").strip().lower() == "storniert"
+        if is_storniert == storniert:
+            return row
     return None
 
 
@@ -236,7 +243,7 @@ def _sync_previous_departure(property_key, checkin_date, adults, children, exclu
     ws.cell(row=row, column=COL_KINDER_U18, value=children or 0)
     same_day = checkin_date == prev_checkout
     ws.cell(row=row, column=COL_GLEICHER_TAG, value="Ja" if same_day else "Nein")
-    wb.save(path)
+    save_workbook_atomic(wb, path)
     log(f"    Putzplan: refreshed row {row} ({wohnung}, {target_date_str}) next-guest counts -> adults={adults}, children={children}")
 
 
@@ -276,6 +283,25 @@ def append_putzplan_row(entry, log=print):
     wb = openpyxl.load_workbook(path)
     ws = wb[PUTZPLAN_SHEET]
 
+    # A replacement booking for a date whose earlier reservation was just
+    # cancelled: revive that row (clear 'storniert', refresh the guest
+    # counts) instead of inserting a second row for the same day — column A
+    # keeps the cleaner who was responsible, which is exactly what the
+    # cancellation/replacement logic in cleaner_coordination needs.
+    revived_row = _find_row_by_date(ws, wohnung, format_date_de(checkout_date), storniert=True)
+    if revived_row is not None:
+        cleaner_code = ws.cell(row=revived_row, column=COL_WER).value
+        ws.cell(row=revived_row, column=COL_CHECKIN_UHR, value=None)
+        ws.cell(row=revived_row, column=COL_GLEICHER_TAG, value="Ja" if same_day else "Nein")
+        if next_adults is not None:
+            ws.cell(row=revived_row, column=COL_ERWACHSENE, value=next_adults)
+        ws.cell(row=revived_row, column=COL_KINDER_U18, value=next_children)
+        save_workbook_atomic(wb, path)
+        log(f"    Putzplan: revived storniert row {revived_row} ({wohnung}, {format_date_de(checkout_date)}), "
+            f"cleaner in column A: {cleaner_code}")
+        _sync_previous_departure(property_key, checkin_date, entry.get("adults"), entry.get("children", 0), code, log)
+        return {"revived": True, "cleaner_code": cleaner_code}
+
     row = _find_insert_row(ws, checkout_date)
     ws.insert_rows(row)
 
@@ -292,13 +318,14 @@ def append_putzplan_row(entry, log=print):
         ws.cell(row=row, column=COL_ERWACHSENE, value=next_adults)
     ws.cell(row=row, column=COL_KINDER_U18, value=next_children)
 
-    wb.save(path)
+    save_workbook_atomic(wb, path)
     log(f"    Putzplan: inserted row {row} ({wohnung}, {format_date_de(checkout_date)}), next guests: "
         f"adults={next_adults}, children={next_children}, gleicher Tag={same_day}")
 
     # This new reservation might itself be the "next" guest for an
     # earlier departure whose row already exists.
     _sync_previous_departure(property_key, checkin_date, entry.get("adults"), entry.get("children", 0), code, log)
+    return {"revived": False, "cleaner_code": None}
 
 
 def sync_putzplan_for_reservation(property_key, checkin_date, adults, children, exclude_confirmation_code, log=print):
@@ -327,14 +354,18 @@ def flag_putzplan_cancelled(property_key, checkout_date, log=print):
     Known limitation (2026-09-24): if the cancelled reservation was
     itself some earlier departure's 'next guest', that earlier row's
     counts are now stale and aren't automatically recomputed — see module
-    docstring."""
+    docstring.
+
+    Returns None if nothing was flagged, else {"cleaner_code": <column A or
+    None>} — the row is NOT deleted and column A keeps the responsible
+    cleaner, so cancellation + replacement booking can find them again."""
     wohnung = PUTZPLAN_WOHNUNG_LABELS.get(property_key)
     if wohnung is None or checkout_date is None:
-        return
+        return None
 
     path = _putzplan_path()
     if not os.path.exists(path):
-        return
+        return None
 
     target_date_str = format_date_de(checkout_date) if isinstance(checkout_date, datetime.date) else str(checkout_date)
 
@@ -345,11 +376,13 @@ def flag_putzplan_cancelled(property_key, checkout_date, log=print):
     row = _find_row_by_date(ws, wohnung, target_date_str)
     if row is None:
         log(f"    Putzplan: no matching row found to flag cancelled ({wohnung}, {target_date_str}) — skipped")
-        return
+        return None
 
+    cleaner_code = ws.cell(row=row, column=COL_WER).value  # stays in the row — who was responsible
     ws.cell(row=row, column=COL_CHECKIN_UHR, value="storniert")
-    wb.save(path)
-    log(f"    Putzplan: marked row {row} storniert ({wohnung}, {target_date_str})")
+    save_workbook_atomic(wb, path)
+    log(f"    Putzplan: marked row {row} storniert ({wohnung}, {target_date_str}), cleaner: {cleaner_code}")
+    return {"cleaner_code": cleaner_code}
 
 
 def assign_cleaner(property_key, checkout_date, cleaner_code, log=print):
@@ -359,7 +392,9 @@ def assign_cleaner(property_key, checkout_date, cleaner_code, log=print):
     confirmation triggers (2026-10-01, see app/whatsapp_webhook.py).
     Silently does nothing if no matching row is found (shouldn't normally
     happen — iter_open_rows() is what found this row in the first place —
-    but the row could have been manually edited in the meantime)."""
+    but the row could have been manually edited in the meantime).
+    cleaner_code=None clears the cell again (the confirmed cleaner backed
+    out, 2026-10-01) — the row counts as open in iter_open_rows() again."""
     wohnung = PUTZPLAN_WOHNUNG_LABELS.get(property_key)
     if wohnung is None or checkout_date is None:
         return False
@@ -380,6 +415,54 @@ def assign_cleaner(property_key, checkout_date, cleaner_code, log=print):
         return False
 
     ws.cell(row=row, column=COL_WER, value=cleaner_code)
-    wb.save(path)
-    log(f"    Putzplan: assigned {cleaner_code} to row {row} ({wohnung}, {target_date_str})")
+    save_workbook_atomic(wb, path)
+    log(f"    Putzplan: {'cleared cleaner' if cleaner_code is None else 'assigned ' + cleaner_code} "
+        f"in row {row} ({wohnung}, {target_date_str})")
     return True
+
+
+def get_assigned_code(property_key, checkout_date):
+    """Column A of the (non-storniert) row for this property/date, or None."""
+    wohnung = PUTZPLAN_WOHNUNG_LABELS.get(property_key)
+    path = _putzplan_path()
+    if wohnung is None or checkout_date is None or not os.path.exists(path):
+        return None
+    wb = openpyxl.load_workbook(path, read_only=False, data_only=True)
+    try:
+        ws = wb[PUTZPLAN_SHEET]
+        row = _find_row_by_date(ws, wohnung, format_date_de(checkout_date))
+        return ws.cell(row=row, column=COL_WER).value if row else None
+    finally:
+        wb.close()
+
+
+def iter_assigned_rows(checkout_date):
+    """Yields (property_key, cleaner_code, guests) for every non-storniert
+    row on `checkout_date` that already has a cleaner in column A — used by
+    the day-before reminder (16:00) and cancellation (19:00) jobs. `guests`
+    is the NEXT arrival's headcount as shown in the row: {"adults", "children"
+    (under 18), "children_u3" (column I, filled by hand — usually blank)}.
+    Read-only."""
+    path = _putzplan_path()
+    if not os.path.exists(path):
+        return
+    label_to_property = {v: k for k, v in PUTZPLAN_WOHNUNG_LABELS.items()}
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    try:
+        ws = wb[PUTZPLAN_SHEET]
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            wer = row[COL_WER - 1]
+            if not wer:
+                continue
+            if str(row[COL_CHECKIN_UHR - 1] or "").strip().lower() == "storniert":
+                continue
+            property_key = label_to_property.get(row[COL_WOHNUNG - 1])
+            if property_key is None or _parse_de_date(row[COL_DATUM - 1]) != checkout_date:
+                continue
+            yield property_key, str(wer).strip(), {
+                "adults": row[COL_ERWACHSENE - 1],
+                "children": row[COL_KINDER_U18 - 1],
+                "children_u3": row[COL_KINDER_U3 - 1],
+            }
+    finally:
+        wb.close()

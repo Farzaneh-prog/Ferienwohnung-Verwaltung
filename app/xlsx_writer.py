@@ -164,6 +164,17 @@ def target_sheet_for(checkin_date) -> str:
     return str((checkin_date.month - 1) // 3 + 1)
 
 
+def save_workbook_atomic(wb, path):
+    """Write to a temp file in the same folder, then os.replace() it over the
+    real file. A plain wb.save(path) truncates the file first — if the process
+    is killed mid-write (container redeploy/restart, power loss) the Excel file
+    is left corrupt (happened 2026-10-01: Putzplan2026.xlsx). With this, the
+    old file stays intact until the new one is completely written."""
+    tmp = f"{path}.tmp"
+    wb.save(tmp)
+    os.replace(tmp, path)
+
+
 def backup_file(path):
     os.makedirs(os.path.join(DATA_DIR, "backups"), exist_ok=True)
     ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
@@ -394,6 +405,14 @@ def apply_cancellation(wb, header_map_cache, entry, log=print):
     return None
 
 
+def _best_effort(func, *args, log=print, **kwargs):
+    """WhatsApp coordination hooks must never break an import."""
+    try:
+        func(*args, log=log, **kwargs)
+    except Exception as exc:  # noqa: BLE001
+        log(f"    WARN: {func.__name__} failed: {exc!r}")
+
+
 def process_batch(new_reservations, cancellations, log=print):
     """Apply a batch of reservations/cancellations across however many
     properties they touch, backing up each touched file exactly once. Used
@@ -451,13 +470,23 @@ def process_batch(new_reservations, cancellations, log=print):
             cancelled_info.append((property_key, cancelled_row))
 
     for property_key, (path, wb) in touched_files.items():
-        wb.save(path)
+        save_workbook_atomic(wb, path)
         log(f"    saved {path}")
 
-    for applied in applied_rows:
-        putzplan_writer.append_putzplan_row(applied["entry"], log=log)
+    from . import day_before
+
+    # Order matters: cancellations first, so a cancel + replacement booking
+    # for the same date in ONE batch is revived by append_putzplan_row.
     for property_key, cancelled_row in cancelled_info:
-        putzplan_writer.flag_putzplan_cancelled(property_key, cancelled_row.get("checkout"), log=log)
+        flagged = putzplan_writer.flag_putzplan_cancelled(property_key, cancelled_row.get("checkout"), log=log)
+        if flagged is not None:
+            _best_effort(day_before.on_cancellation, property_key, putzplan_writer._to_date(cancelled_row.get("checkout")),
+                         flagged.get("cleaner_code"), log=log)
+    for applied in applied_rows:
+        info = putzplan_writer.append_putzplan_row(applied["entry"], log=log)
+        if info is not None:
+            _best_effort(day_before.on_new_reservation, applied["property"],
+                         parse_date(applied["entry"]["checkout"]), info.get("cleaner_code"), log=log)
 
     # Phase 2 (2026-09-25): a fresh reservation immediately gets Farzaneh a
     # checkin-reminder email (see checkin_reminder.py) — not a daily check,
@@ -543,7 +572,7 @@ def update_reservation_fields(property_key, confirmation_code, updates: dict, lo
         if found:
             break
     if found:
-        wb.save(path)
+        save_workbook_atomic(wb, path)
         log(f"    updated row for code={code} in {path}")
         if ("adults" in updates or "children" in updates) and checkin_value is not None:
             from . import putzplan_writer  # local import to avoid a circular import

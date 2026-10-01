@@ -82,6 +82,39 @@ def _putzplan_path():
     return os.path.join(DATA_DIR, PUTZPLAN_FILE)
 
 
+def iter_open_rows():
+    """Yields (property_key, checkout_date) for every Putzplan row that
+    still needs a cleaner assigned — column A (Wer macht das) empty, and
+    not already flagged 'storniert' in column J. Read-only. Used by
+    app/cleaner_coordination.py (phase 3, 2026-09-30) to know which rows
+    need a WhatsApp coordination attempt — column A assignment used to be
+    fully manual (see module docstring history); phase 3 is what starts
+    filling it in automatically."""
+    path = _putzplan_path()
+    if not os.path.exists(path):
+        return
+    label_to_property = {v: k for k, v in PUTZPLAN_WOHNUNG_LABELS.items()}
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    try:
+        ws = wb[PUTZPLAN_SHEET]
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            wer = row[COL_WER - 1]
+            wohnung = row[COL_WOHNUNG - 1]
+            datum = row[COL_DATUM - 1]
+            checkin_uhr = row[COL_CHECKIN_UHR - 1]
+            if wer:
+                continue
+            if str(checkin_uhr or "").strip().lower() == "storniert":
+                continue
+            property_key = label_to_property.get(wohnung)
+            checkout_date = _parse_de_date(datum)
+            if property_key is None or checkout_date is None:
+                continue
+            yield property_key, checkout_date
+    finally:
+        wb.close()
+
+
 def _parse_de_date(value):
     if not value:
         return None
@@ -317,3 +350,36 @@ def flag_putzplan_cancelled(property_key, checkout_date, log=print):
     ws.cell(row=row, column=COL_CHECKIN_UHR, value="storniert")
     wb.save(path)
     log(f"    Putzplan: marked row {row} storniert ({wohnung}, {target_date_str})")
+
+
+def assign_cleaner(property_key, checkout_date, cleaner_code, log=print):
+    """Writes the confirmed cleaner's code (e.g. 'Meh-Ü', matching
+    app/cleaner_roster.py's 'code' field) into column A (Wer macht das) of
+    the matching row — the automatic write-back phase 3's WhatsApp
+    confirmation triggers (2026-10-01, see app/whatsapp_webhook.py).
+    Silently does nothing if no matching row is found (shouldn't normally
+    happen — iter_open_rows() is what found this row in the first place —
+    but the row could have been manually edited in the meantime)."""
+    wohnung = PUTZPLAN_WOHNUNG_LABELS.get(property_key)
+    if wohnung is None or checkout_date is None:
+        return False
+
+    path = _putzplan_path()
+    if not os.path.exists(path):
+        return False
+
+    target_date_str = format_date_de(checkout_date) if isinstance(checkout_date, datetime.date) else str(checkout_date)
+
+    backup_file(path)
+    wb = openpyxl.load_workbook(path)
+    ws = wb[PUTZPLAN_SHEET]
+
+    row = _find_row_by_date(ws, wohnung, target_date_str)
+    if row is None:
+        log(f"    Putzplan: no matching row found to assign cleaner ({wohnung}, {target_date_str}) — skipped")
+        return False
+
+    ws.cell(row=row, column=COL_WER, value=cleaner_code)
+    wb.save(path)
+    log(f"    Putzplan: assigned {cleaner_code} to row {row} ({wohnung}, {target_date_str})")
+    return True

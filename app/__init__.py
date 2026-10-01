@@ -12,7 +12,9 @@ def create_app():
 
     from .routes import bp
     from .routes_workflow import bp as workflow_bp
+    from .whatsapp_webhook import bp as whatsapp_webhook_bp
 
     app.register_blueprint(bp)
     app.register_blueprint(workflow_bp)
+    app.register_blueprint(whatsapp_webhook_bp)
     return app

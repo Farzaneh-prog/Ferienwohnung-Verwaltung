@@ -24,6 +24,7 @@ from openpyxl.utils import get_column_letter, column_index_from_string
 from .config import PROPERTY_FILES, PROPERTY_FILE_YEAR, FUTURE_YEAR_SHEET, DATA_DIR
 from .excel_reader import FIELD_HEADERS, _build_header_map
 from . import known_codes
+from . import checkin_reminder
 
 # Column indices (1-based) with no header text — structural, not name-addressable.
 COL_I_ADULT_NIGHTS = 9    # =F*G
@@ -347,10 +348,13 @@ def append_reservation(ws, header_map, entry, log=print):
 
 
 def apply_cancellation(wb, header_map_cache, entry, log=print):
-    """Returns None if no matching row was found, otherwise the cancelled
-    row's own checkout date — used by process_batch to best-effort flag
-    the matching Putzplan row too (see putzplan_writer; Putzplan is keyed
-    on Abreise/checkout, not checkin — confirmed 2026-09-22)."""
+    """Returns None if no matching row was found, otherwise a dict with
+    that row's own checkin/checkout/guest_name/confirmation_code —
+    checkout is used by process_batch to best-effort flag the matching
+    Putzplan row too (see putzplan_writer; Putzplan is keyed on
+    Abreise/checkout, not checkin — confirmed 2026-09-22); the rest is
+    used to email Farzaneh so she knows which checkin-reminder calendar
+    entry to delete (see checkin_reminder.py, 2026-09-25)."""
     code = str(entry.get("confirmation_code", "")).strip()
     if not code:
         log("    WARN: cancellation entry missing confirmation_code, skipping")
@@ -365,6 +369,8 @@ def apply_cancellation(wb, header_map_cache, entry, log=print):
         code_col = header_map.get(FIELD_HEADERS["confirmation_code"])
         flag_col = header_map.get(FIELD_HEADERS["cancelled"])
         checkout_col = header_map.get(FIELD_HEADERS["checkout"])
+        checkin_col = header_map.get(FIELD_HEADERS["checkin"])
+        guest_name_col = header_map.get(FIELD_HEADERS["guest_name"])
         if code_col is None or flag_col is None:
             continue
         # Scan every row up to the sheet's real extent — NOT "stop at the
@@ -378,7 +384,12 @@ def apply_cancellation(wb, header_map_cache, entry, log=print):
             if str(cell_val).strip() == code:
                 ws.cell(row=row, column=flag_col + 1, value="ja")
                 log(f"    marked row {row} (sheet {sheet_name}) as Storniert (code={code})")
-                return ws.cell(row=row, column=checkout_col + 1).value if checkout_col is not None else None
+                return {
+                    "confirmation_code": code,
+                    "checkout": ws.cell(row=row, column=checkout_col + 1).value if checkout_col is not None else None,
+                    "checkin": ws.cell(row=row, column=checkin_col + 1).value if checkin_col is not None else None,
+                    "guest_name": ws.cell(row=row, column=guest_name_col + 1).value if guest_name_col is not None else None,
+                }
     log(f"    WARN: confirmation_code {code} not found, cancellation not applied")
     return None
 
@@ -402,7 +413,7 @@ def process_batch(new_reservations, cancellations, log=print):
     header_map_cache = {}
     applied_rows = []
     skipped = []
-    cancelled_info = []  # (property_key, {checkin, adults, children})
+    cancelled_info = []  # (property_key, cancelled_row_dict) — see apply_cancellation
 
     def get_workbook(property_key):
         if property_key not in touched_files:
@@ -435,9 +446,9 @@ def process_batch(new_reservations, cancellations, log=print):
             continue
         wb = get_workbook(property_key)
         cache_for_property = {k[1]: v for k, v in header_map_cache.items() if k[0] == property_key}
-        checkout_value = apply_cancellation(wb, cache_for_property, c, log=log)
-        if checkout_value is not None:
-            cancelled_info.append((property_key, checkout_value))
+        cancelled_row = apply_cancellation(wb, cache_for_property, c, log=log)
+        if cancelled_row is not None:
+            cancelled_info.append((property_key, cancelled_row))
 
     for property_key, (path, wb) in touched_files.items():
         wb.save(path)
@@ -445,8 +456,22 @@ def process_batch(new_reservations, cancellations, log=print):
 
     for applied in applied_rows:
         putzplan_writer.append_putzplan_row(applied["entry"], log=log)
-    for property_key, checkout_value in cancelled_info:
-        putzplan_writer.flag_putzplan_cancelled(property_key, checkout_value, log=log)
+    for property_key, cancelled_row in cancelled_info:
+        putzplan_writer.flag_putzplan_cancelled(property_key, cancelled_row.get("checkout"), log=log)
+
+    # Phase 2 (2026-09-25): a fresh reservation immediately gets Farzaneh a
+    # checkin-reminder email (see checkin_reminder.py) — not a daily check,
+    # she wants it as soon as the booking exists. Never allowed to break the
+    # import itself (maybe_send_reminder swallows its own errors).
+    for applied in applied_rows:
+        checkin_reminder.maybe_send_reminder(applied["entry"], applied["property"], log=log)
+
+    # A cancellation may have to undo a reminder already sent (i.e. already
+    # added to Farzaneh's phone calendar) — tell her which entry to delete.
+    # Only fires if a reminder was actually sent for this code; never breaks
+    # the import (maybe_send_cancellation_email swallows its own errors).
+    for property_key, cancelled_row in cancelled_info:
+        checkin_reminder.maybe_send_cancellation_email(cancelled_row, property_key, log=log)
 
     # Record every code this batch touched — added OR cancelled, whether or
     # not the cancellation actually found a row to flag — in known_codes.py

@@ -73,6 +73,10 @@ app/
   putzplan_writer.py        Schreibt/synchronisiert Putzplan2026.xlsx
   known_codes.py            Persistentes Duplikat-Gedächtnis (überlebt manuelles
                             Löschen einer Zeile)
+  checkin_reminder.py        Check-in-Erinnerungs-E-Mail mit .ics-Kalenderalarm
+                            (siehe unten)
+  notified_checkins.py       Persistentes Gedächtnis, welche Reservierung schon
+                            eine Erinnerung bekommen hat (verhindert Doppel-Mails)
   quick_alerts.py           Von der Excel-Datei entkoppelte Mini-Warnliste
   routes.py / routes_workflow.py   /login, /reservations, /import, /complete, /alerts
   templates/               Alle HTML-Seiten
@@ -143,6 +147,86 @@ Volle Details (Netzwerk-Setup, SSH-Key-Einrichtung, der `$`-Escaping-Stolperstei
 in `.env` für Docker Compose, warum Reverse-Proxy Port 8443 statt 443 nutzt)
 stehen in `docs/STATUS.md`, Abschnitt 12.
 
+## Check-in-Erinnerung per E-Mail (seit 2026-09-25)
+
+Sobald eine neue Reservierung geschrieben wird (`/import`), verschickt
+`app/checkin_reminder.py` sofort eine E-Mail an Farzaneh (Gmail) mit einer
+`.ics`-Kalenderanhang. Öffnet sie den Anhang am iPhone, bietet iOS "Zum
+Kalender hinzufügen" an — der Termin selbst liegt auf **16:00 Uhr am Tag
+vor der Anreise** und trägt einen `VALARM`, sodass iOS von sich aus einen
+echten Alarm auslöst (kein Push-Dienst, kein Twilio nötig).
+
+- **Kein täglicher Check** — die Mail geht sofort beim Anlegen der
+  Reservierung raus, nicht erst am Vortag (2026-09-25 bewusst so von
+  Farzaneh entschieden).
+- **Versand:** über Gmail mit einem App-Passwort (`GMAIL_USER` /
+  `GMAIL_APP_PASSWORD` in `.env` — siehe `.env.example`). Fehlt eins von
+  beiden, wird der Import trotzdem normal fortgesetzt, nur die Mail
+  bleibt aus (Warnung im Log).
+- **Empfänger bewusst NICHT das private Gmail-Konto** (`NOTIFY_TO_EMAIL`
+  in `.env`, Default wäre `GMAIL_USER`) — die Gmail-App auf dem iPhone
+  zeigt bei `.ics`-Anhängen keinen "Zum Kalender hinzufügen"-Button
+  (bestätigtes 2026-09-25-Problem, siehe Git-Historie). Farzaneh empfängt
+  die Erinnerungen stattdessen auf `kontakt@marktresidenz-eisenach.de`,
+  das über die native iOS-Mail-App eingerichtet ist — dort funktioniert
+  der Kalender-Import automatisch.
+- **Kein Doppelversand:** `data/notified_checkins.json` merkt sich jede
+  bereits benachrichtigte Reservierung (Bestätigungscode, sonst
+  Gastname+Anreisedatum als Fallback).
+- **Backfill für bereits bestehende Buchungen:** einmalig
+  `python -m app.checkin_reminder` ausführen — schickt die Erinnerung für
+  alle aktuell noch in der Zukunft liegenden Reservierungen in beiden
+  Dateien nach (bereits benachrichtigte werden übersprungen).
+- **Stornierung:** Wenn eine Reservierung storniert wird, für die schon
+  eine Erinnerung verschickt wurde, geht automatisch eine zweite Mail
+  raus ("STORNIERT: ... — Kalendereintrag löschen") mit Datum/Uhrzeit des
+  betroffenen Kalendertermins zum manuellen Löschen, plus einem
+  Storno-`.ics` (`METHOD:CANCEL`, gleiche UID) als Best-Effort-Versuch,
+  den Termin automatisch zu entfernen — das klappt aber nur zuverlässig,
+  wenn die Kalender-App den ursprünglichen Termin noch mit dieser UID
+  verknüpft; manuelles Löschen bleibt der garantierte Weg. War noch nie
+  verschickt worden (z.B. weil die Reservierung storniert wurde, bevor
+  eine Erinnerung fällig war), bleibt die Mail ganz aus — es gibt dann
+  nichts zu löschen.
+
+## WhatsApp-Koordination der Putzkräfte — Stage 1 (seit 2026-10-01)
+
+Eskalationslogik, echter WhatsApp-Versand über Twilio und ein Webhook für
+die Antworten der Putzkräfte — ein letzter End-to-End-Test der
+Bestätigungs-Rückschreibung steht noch aus, siehe `docs/STATUS.md`
+Abschnitt 15 für den genauen Stand und die nächsten Schritte.
+
+- `app/cleaner_roster.py` — Liste der Putzkräfte (Name, WhatsApp-Nummer,
+  Objekte, verfügbare Wochentage, Stundensatz, Vertragsende, Prioritäts-
+  Stufe) in `data/cleaners.json` (gitignored, auf NAS und lokal synchron
+  gehalten). Wird beim ersten Aufruf mit den in
+  `نظافتچی_ها-و-فرمول_های-مالی.md` bestätigten Werten befüllt — die
+  WhatsApp-Nummern aller 5 Putzkräfte sind inzwischen eingetragen.
+- `app/cleaner_coordination.py` — die Eskalationslogik
+  (`decide_next_action`): wer als Nächstes angeschrieben werden sollte,
+  basierend auf Tagen bis zur Abreise, wer schon versucht wurde, der
+  gerechten Jennifer/Mehrnaz-Rotation, und einer Ruhezeit (keine Nachricht
+  22:00–08:00 Europe/Berlin — eine verspätete Entscheidung wird einfach
+  bis 08:00 zurückgehalten, nicht separat nachgeholt). `confirm_cleaner`
+  schreibt eine Bestätigung sofort in die passende Putzplan-Zeile
+  (Spalte A, über `app/putzplan_writer.assign_cleaner`).
+- `app/whatsapp_sender.py` — dünner Twilio-Wrapper. Business-initiierte
+  Erstkontakte MÜSSEN ein genehmigtes Content Template verwenden (freier
+  Text funktioniert nur als Antwort innerhalb eines bereits offenen
+  24-Stunden-Fensters) — `send_cleaner_request` nutzt ein Template mit
+  drei Quick-Reply-Buttons (Ja/Nein/Vielleicht).
+- `app/whatsapp_webhook.py` — empfängt Twilios Eingangs-Webhook
+  (`/webhooks/whatsapp`), prüft die Twilio-Signatur, findet die
+  passende offene Putzplan-Zeile für den Antwortenden und bestätigt sie
+  bei "Ja". Muss öffentlich erreichbar sein (läuft nur auf dem NAS, nicht
+  lokal) — als Sandbox-Webhook-URL in der Twilio Console eingetragen.
+- `python -m app.cleaner_coordination` — Trockenlauf (dry-run, Standard)
+  gegen die echten, noch offenen Putzplan-Zeilen: loggt nur, was
+  passieren WÜRDE. `dry_run=False` verschickt echte Nachrichten.
+- State (wer wann angeschrieben wurde, Rotations-Merker, Urlaubswochen,
+  Bestätigungen) liegt in `data/cleaner_coordination_state.json`
+  (gitignored).
+
 ## Demo-Daten
 
 `sample_data/` enthält Beispieldateien mit derselben Struktur, aber frei
@@ -186,12 +270,22 @@ Skript-Docstring). Backups der Originaldateien vor dem Schrumpfen liegen in
 
 1. **Passendes Frontend** — die aktuelle Oberfläche ist bewusst minimal und war nur
    zum Testen gedacht.
-2. **Erinnerung einen Tag vor Gästeankunft** an Farzaneh selbst.
-3. **WhatsApp-Koordination der Putzkräfte** (Twilio) — Rotations-/Eskalations-Logik
-   ist bereits dokumentiert, braucht noch einen Verfügbarkeits-Kalender der
-   Putzkräfte.
-4. **Automatisches Eintragen von Putzkraft-Name und -Preis** in die Excel-Datei,
-   sobald eine Reinigung über WhatsApp bestätigt wurde.
+2. ~~**Erinnerung einen Tag vor Gästeankunft** an Farzaneh selbst.~~ **Erledigt
+   (2026-09-25)** — siehe Abschnitt "Check-in-Erinnerung per E-Mail" oben.
+3. **WhatsApp-Koordination der Putzkräfte** (Twilio) — **Stage 1 gebaut
+   (2026-10-01):** echter Versand über ein genehmigtes Content Template
+   (Quick-Reply-Buttons Ja/Nein/Vielleicht) plus ein öffentlich
+   erreichbarer Webhook, der eine "Ja"-Antwort direkt in die passende
+   Putzplan-Zeile schreibt — beides auf dem NAS deployed und das
+   Twilio-Sandbox-Webhook ist eingetragen. Ein letzter End-to-End-Test der
+   kompletten Antwort-Kette fehlt noch (nächster Schritt). Siehe
+   `docs/STATUS.md` Abschnitt 15.
+4. ~~**Automatisches Eintragen von Putzkraft-Name** in die Excel-Datei,
+   sobald eine Reinigung über WhatsApp bestätigt wurde.~~ **Im Rahmen von
+   Stage 1 miterledigt** (`app/putzplan_writer.assign_cleaner`) — nur das
+   automatische Eintragen des **Preises** in die GästeListe-Spalten T/U/V
+   (aktuell Platzhalter) ist noch offen, siehe `docs/STATUS.md` Abschnitt
+   15 ("Stage 2+").
 
 Die Hosting-Entscheidung, an der Phasen 2–4 vorher hingen (ein öffentlich
 erreichbarer, dauerhaft laufender Server), ist am 2026-09-25 gefallen und

@@ -38,6 +38,7 @@ DEFAULT_ROSTER = {
     "jennifer": {
         "name": "Jennifer",
         "code": "Jen-Ü",
+        "sheet_name": "Jennifer",
         "whatsapp_number": None,
         "properties": ["karlstrasse", "eisenach"],
         "available_days": ALL_DAYS,
@@ -49,6 +50,7 @@ DEFAULT_ROSTER = {
     "mehrnaz": {
         "name": "Mehrnaz",
         "code": "Meh-Ü",
+        "sheet_name": "Mehrnaz",
         "whatsapp_number": None,
         "properties": ["karlstrasse", "eisenach"],
         "available_days": ALL_DAYS,
@@ -60,6 +62,7 @@ DEFAULT_ROSTER = {
     "manuela": {
         "name": "Manuela",
         "code": "M-Ü",
+        "sheet_name": "Manuela",
         "whatsapp_number": None,
         "properties": ["karlstrasse"],
         "available_days": NOT_SUNDAY,
@@ -71,6 +74,7 @@ DEFAULT_ROSTER = {
     "tahmine": {
         "name": "Tahmine",
         "code": "Tah-Ü",
+        "sheet_name": "Tahmina",
         "whatsapp_number": None,
         # Rate table says "meistens Sa/So" but the architecture doc's
         # automated chain condition (بخش ۴) is stricter: "فقط اگه
@@ -86,6 +90,7 @@ DEFAULT_ROSTER = {
     "ramic": {
         "name": "Ramic (Ramesch)",
         "code": "R-Ü",
+        "sheet_name": "Ramic",
         "whatsapp_number": None,
         "properties": ["karlstrasse", "eisenach"],
         "available_days": WEEKEND,
@@ -103,7 +108,33 @@ def load_roster() -> dict:
     if not os.path.exists(_PATH):
         save_roster(DEFAULT_ROSTER)
     with open(_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)
+        roster = json.load(f)
+    only = os.environ.get("SCHEDULER_ONLY_CLEANERS", "").strip()
+    if only:  # TEST MODE (see cleaner_coordination.test_mode): hide everybody else
+        allowed = {c.strip() for c in only.split(",") if c.strip()}
+        roster = {cid: c for cid, c in roster.items() if cid in allowed}
+    return roster
+
+
+def sheet_label(cleaner: dict) -> str:
+    """What goes into Putzplan column A for this cleaner. The real sheet uses
+    first names (Mehrnaz, Manuela, Jennifer, Ramic, "Tahmina" — note the
+    spelling), not the GästeListe codes (Jen-Ü, ...)."""
+    return cleaner.get("sheet_name") or cleaner["name"]
+
+
+def match_cleaner(roster: dict, text):
+    """cleaner_id for a Putzplan column-A value (or None): case-insensitive,
+    matched against id, name, sheet_name, code and optional "aliases". Free
+    text that is no single name ("ich", "Mehrnaz-Jennifer", notes) -> None."""
+    wanted = str(text or "").strip().lower()
+    if not wanted:
+        return None
+    for cid, c in roster.items():
+        names = {cid, c.get("name"), c.get("sheet_name"), c.get("code"), *c.get("aliases", [])}
+        if wanted in {str(n).strip().lower() for n in names if n}:
+            return cid
+    return None
 
 
 def save_roster(roster: dict) -> None:

@@ -32,6 +32,7 @@ from twilio.twiml.messaging_response import MessagingResponse
 from . import cleaner_coordination as cc
 from .cleaner_roster import load_roster
 from .config import PROPERTY_LABELS
+from . import owner_alerts
 from .owner_alerts import notify_owner
 from .tz import BERLIN
 
@@ -111,9 +112,15 @@ def incoming_whatsapp():
     with cc.STATE_LOCK:
         cleaner_id = _pick_cleaner_id(_find_cleaner_ids_by_number(from_number, roster), cc._load_state(), now.date())
         if cleaner_id is None:
-            # Not a number we recognize (could be Farzaneh's own test replies
-            # from earlier, or a wrong number) — nothing to do, but still 200
-            # so Twilio doesn't retry.
+            owner_number = os.environ.get("OWNER_WHATSAPP_NUMBER")
+            if owner_number and from_number == owner_number:
+                # The owner said hello: free-text live updates for the next 24h
+                # (see owner_alerts). Important warnings never depend on this.
+                owner_alerts.open_window(now)
+                return _twiml("✓ Live-Updates sind jetzt 24 Stunden lang aktiv. "
+                              "Wichtige Warnungen bekommst du immer, auch ohne Hallo.")
+            # Not a number we recognize (a wrong number) — nothing to do, but
+            # still 200 so Twilio doesn't retry.
             return _twiml()
         if response is None:
             # Free text, voice message, photo, ... — the automation can't read

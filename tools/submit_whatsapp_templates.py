@@ -25,13 +25,13 @@ from twilio.rest.content.v1.content.approval_create import ApprovalCreateList  #
 TEMPLATES = {
     "cleaner_coordination_request_quickreply_de": "HX8953397e888345beaba2f36eb5f150d9",
     "putzplan_reminder_open": "HX96afc7964e8d69ad98ed4718f59d190c",
-    "putzplan_urgent": "HXb5aad2c56e82bc85cd776ae00921c63e",
+    "putzplan_urgent_v2": "HX00f3a39268ae0fae30e4b5650faa168f",  # v1 was reclassified as MARKETING by Meta
     "putzplan_taken": "HX5abcf216022453b9e3c49c34c64e7294",
     "putzplan_promoted": "HXfc63f7d3907315836ef1338384e7665a",
     "putzplan_cancelled": "HX7b83ed2555eb8c5ac2b480b3126045a7",
     "putzplan_reminder_tomorrow_v2": "HX9d7447ca4372c3ec648ede6e3dded71e",
     "putzplan_again": "HXb5e8f2515c41bdd68e5a5b7347fd4f93",
-    "putzplan_owner_notice": "HX825046c3748afed5a8097655a44467ac",
+    "putzplan_owner_notice_v2": "HX7d488d852c44b1e006c11553716158a4",  # v1 was rejected by Meta (variable at the end)
 }
 
 

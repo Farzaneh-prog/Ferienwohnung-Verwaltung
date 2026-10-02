@@ -910,3 +910,27 @@ promoted، cancelled، reminder_tomorrow_v2، again، owner_notice.
 **بعداً:** صفحه‌ی داشبورد برای پیشرفت/تاریخچه، قیمت در GästeListe T/U/V،
 تأیید کسب‌وکار Meta (ممکن است هفته‌ها طول بکشد)، به‌روزرسانی `pytz` (الان
 بدون نسخه).
+
+### ۱۹. کانال‌های هشدار مالک، قالب‌های Meta، لینک اکسل (۲۰۲۶-۱۰-۰۱ شب)
+
+- **Meta دسته‌ی دو قالب را به MARKETING برد:** `putzplan_urgent` (لحن «dringend»)
+  و `putzplan_owner_notice_v2` (تقریباً فقط یک متغیر آزاد). `owner_notice` v1 رد
+  شد ("variables can't be at the start or end"). نسخه‌های جدید:
+  `putzplan_urgent_v2` (بی‌طرف‌تر، Ja/Nein) — در انتظار، UTILITY — و
+  `putzplan_owner_notice_v2` (Marketing؛ برای چند هشدار در ماه مشکلی نیست).
+  `app/whatsapp_sender.py` از همین الان به SIDهای v2 اشاره می‌کند، پس **بدون
+  تأیید هر دو، `TWILIO_WHATSAPP_FROM` را عوض نکن.**
+  قیمت تقریبی آلمان (منابع غیررسمی): Utility ≈ ۰٫۰۴۶€، Marketing ≈ ۰٫۱۱۳€ /پیام.
+- **هشدار مالک — ترکیبی** (`app/owner_alerts.py`): هشدار مهم (متن با ⚠️) =
+  همیشه واتساپ (قالب) + همان لحظه ایمیل؛ پیام‌های عادی = ایمیل تجمعی **هر روز
+  ۱۸:۰۰** (فقط اگر چیزی بود) + اگر پنجره‌ی ۲۴ساعته باز است، همان لحظه متن
+  آزاد در واتساپ. پنجره فقط با «Hallo» دستی مالک به شماره‌ی کسب‌وکار باز
+  می‌شود (قابل خودکارکردن نیست؛ وبهوک جواب «Live-Updates aktiv» می‌دهد).
+  ایمیل: `OWNER_DIGEST_EMAIL` (= kontakt@marktresidenz-eisenach.de روی NAS) ←
+  `NOTIFY_TO_EMAIL` ← `GMAIL_USER`. تست ایمیل موفق بود.
+- **لینک خارجی اکسل:** `GästeListe_2026K.xlsx` (برگه‌ی Umsatzsteuer، ۱۱۲
+  فرمول `='[1]1'!…`) به Pf لینک دارد؛ آدرس قدیمی `E:\...\USteuer\` بود. با
+  Excel دسکتاپ از درایو شبکه (Z: = `\192.168.178.21\Ferienwohnung-Data`):
+  Daten → Verknüpfungen bearbeiten → Quelle ändern → Pf کنار فایل → آدرس
+  نسبی شد (تأیید شد). **از File Station/Office Online/Google Docs باز و
+  ذخیره نکن** (لینک را خراب می‌کنند). قبل از import اکسل را ببند.

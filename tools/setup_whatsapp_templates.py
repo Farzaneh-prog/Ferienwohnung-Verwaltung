@@ -55,6 +55,15 @@ TEMPLATES = {
         "Hallo {{1}}, doch noch: Am {{2}} ({{3}}) wird die Reinigung wieder gebraucht — "
         "es gibt eine neue Buchung. Kannst du?",
         {"1": "Name", "2": "01.01.2027", "3": "Karlstraße"}, True),
+    # v2: Meta moved putzplan_urgent from UTILITY to MARKETING -> neutral wording, no "dringend"
+    "putzplan_urgent_v2": (
+        "Hallo {{1}}, für die Reinigung am {{2}} ({{3}}) ist noch niemand verfügbar. "
+        "Kannst du sie bitte übernehmen?",
+        {"1": "Name", "2": "01.01.2027", "3": "Karlstraße"}, True),
+    # v2: Meta rejected v1 ("variables can't be at the start or end of the template")
+    "putzplan_owner_notice_v2": (
+        "Hinweis: {{1}} — Viele Grüße, Ihr Putzplan-Automat",
+        {"1": "Beispieltext"}, False),
     "putzplan_owner_notice": (
         "Hinweis vom Putzplan-Automaten: {{1}}",
         {"1": "Beispieltext"}, False),

@@ -10,6 +10,7 @@ blind polling:
     * a request nobody answered -> check again 1h after it was sent
       (silence counts like "Vielleicht", the next person is asked)
     * a decision held back by quiet hours (22:00-08:00) -> check at 08:00
+- 18:00 daily digest e-mail to the owner (owner_alerts.send_daily_digest).
 - DAILY JOBS (Europe/Berlin): 16:00 check + reminders for tomorrow's
   cleanings + contract warnings; 19:00 cancellations nobody replaced + late
   reminders. The daily 16:00 check is also what starts rows crossing the
@@ -90,6 +91,17 @@ def run_evening_job(hour: int) -> None:
     _log(f"[scheduler] evening job {hour}:00 done ({'dry-run' if is_dry_run() else 'LIVE'})")
 
 
+def run_digest_job() -> None:
+    """18:00: daily e-mail with everything the automation did/noticed."""
+    from . import owner_alerts
+
+    try:
+        sent = owner_alerts.send_daily_digest(log=_log)
+        _log(f"[scheduler] daily digest {'sent' if sent else 'not sent (nothing to report or e-mail failed)'}")
+    except Exception as exc:  # noqa: BLE001
+        _log(f"[scheduler] ERROR in daily digest: {exc!r}")
+
+
 def trigger_check(reason: str = "event") -> None:
     """Event hook for routes (import, cancellation, manual search): run a
     check right away in a background thread. No-op if the scheduler is off."""
@@ -160,6 +172,8 @@ def start_scheduler():
             scheduler.add_job(run_evening_job, CronTrigger(hour=hour, minute=0, timezone=BERLIN_PYTZ),
                               args=[hour], id=f"evening-{hour}", max_instances=1, coalesce=True,
                               misfire_grace_time=1800)
+        scheduler.add_job(run_digest_job, CronTrigger(hour=18, minute=0, timezone=BERLIN_PYTZ),
+                          id="digest-18", max_instances=1, coalesce=True, misfire_grace_time=1800)
         scheduler.add_job(lambda: __import__("app.clock_guard", fromlist=["check"]).check(
             notify=not is_dry_run(), log=_log), "date", id="startup-clock-check",
             run_date=datetime.datetime.now(BERLIN_PYTZ) + datetime.timedelta(seconds=20))

@@ -934,3 +934,19 @@ promoted، cancelled، reminder_tomorrow_v2، again، owner_notice.
   Daten → Verknüpfungen bearbeiten → Quelle ändern → Pf کنار فایل → آدرس
   نسبی شد (تأیید شد). **از File Station/Office Online/Google Docs باز و
   ذخیره نکن** (لینک را خراب می‌کنند). قبل از import اکسل را ببند.
+
+### ۲۰. پر کردن GästeListe بعد از نظافت — ساخته شد (۲۰۲۶-۱۰-۰۲)
+
+`app/post_clean.py` + `xlsx_writer.fill_cleaning_cells` + کار روزانه‌ی **۰۹:۰۰**
+(`scheduler.run_post_clean_job`): برای هر تاریخ نظافتِ گذشته (از
+`POST_CLEAN_SINCE`، پیش‌فرض ۲۰۲۶-۱۰-۰۲، حداکثر ۱۴ روز عقب) نظافتچی را از
+Putzplan ستون A می‌گیرد (`match_cleaner`) و در ردیف GästeListe مهمانِ همان روز
+خروج **V** (کد)، **T** (ساعت)، **U** (دستمزد) را جای مقدارهای پیش‌فرض
+(`M-Ü` / `3.5` / `=T*12`) می‌نویسد. ساعت/نرخ: `cleaner_roster.cleaning_pay`
+(Jennifer/Mehrnaz/Tahmine: ۳٫۰۱۶ / ۳٫۹۷ ساعت و نرخ ثابت هر نفر؛ Ramic ۳ / ۴؛
+**Manuela ساعتی**: T=۳٫۵ و U=`=T*12` — ساعت واقعی را دستی اصلاح کن).
+فقط ردیفی که هنوز پیش‌فرض دارد پر می‌شود (دست‌نویس دست‌نخورده)؛ هر
+ملک/تاریخ یک بار (`excel_filled` در state)؛ ستون A نامشخص → هشدار ⚠️؛ هر
+نوشتن بک‌آپ + ذخیره‌ی اتمیک. `Q` (Verdient) به `U` وابسته است. روی NAS
+DRY-RUN (لاگ «würde … eintragen»)؛ اولین اجرای واقعی: ۰۳.۱۰ ساعت ۰۹:۰۰ برای
+۰۲.۱۰ (بعد از `SCHEDULER_DRY_RUN=0`).

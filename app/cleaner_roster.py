@@ -116,6 +116,34 @@ def load_roster() -> dict:
     return roster
 
 
+# Cleaning hours per property (karlstrasse, eisenach) from
+# نظافتچی_ها-و-فرمول_های-مالی.md. The pay is a FIXED amount per property
+# (rate_karlstrasse/rate_eisenach in the roster) — except Manuela, who is paid
+# per hour (12 €) and whose hours vary: default 3.5, corrected by hand.
+CLEANING_HOURS = {
+    "jennifer": (3.016, 3.97),
+    "mehrnaz": (3.016, 3.97),
+    "tahmine": (3.016, 3.97),
+    "ramic": (3.0, 4.0),
+    "manuela": (3.5, None),
+}
+
+
+def cleaning_pay(cleaner_id: str, cleaner: dict, property_key: str):
+    """(hours, amount, hourly_rate) for GästeListe columns T/U. Fixed-pay
+    cleaners: amount = their rate for the property, hourly_rate None. Hourly
+    (Manuela): amount None (U stays the formula =T*rate), hourly_rate = rate.
+    Returns None if the roster has no rate/hours for this cleaner+property."""
+    index = 0 if property_key == "karlstrasse" else 1
+    rate = cleaner.get(f"rate_{property_key}")
+    hours = cleaner.get(f"hours_{property_key}") or CLEANING_HOURS.get(cleaner_id, (None, None))[index]
+    if rate is None or hours is None:
+        return None
+    if cleaner.get("hourly") or cleaner_id == "manuela":
+        return hours, None, rate
+    return hours, round(float(rate), 2), None
+
+
 def sheet_label(cleaner: dict) -> str:
     """What goes into Putzplan column A for this cleaner. The real sheet uses
     first names (Mehrnaz, Manuela, Jennifer, Ramic, "Tahmina" — note the

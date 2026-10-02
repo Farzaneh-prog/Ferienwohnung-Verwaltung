@@ -299,7 +299,7 @@ Skript-Docstring). Backups der Originaldateien vor dem Schrumpfen liegen in
    sobald eine Reinigung über WhatsApp bestätigt wurde.~~ **Im Rahmen von
    Stage 1 miterledigt** (`app/putzplan_writer.assign_cleaner`) — nur das
    automatische Eintragen des **Preises** in die GästeListe-Spalten T/U/V
-   (aktuell Platzhalter) ist noch offen, siehe `docs/STATUS.md` Abschnitt
+   (Platzhalter) ist seit 2026-10-02 erledigt (`app/post_clean.py`), siehe `docs/STATUS.md` Abschnitt
    15 ("Stage 2+").
 
 Die Hosting-Entscheidung, an der Phasen 2–4 vorher hingen (ein öffentlich

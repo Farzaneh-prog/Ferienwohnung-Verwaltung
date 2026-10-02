@@ -519,6 +519,67 @@ def process_batch(new_reservations, cancellations, log=print):
     return {"applied": applied_rows, "skipped": skipped, "files_touched": list(touched_files.keys())}
 
 
+def _to_date_cell(value):
+    """GästeListe date cell -> date or None: real Excel dates or the
+    'DD.MM.YYYY' text this app writes."""
+    if isinstance(value, datetime.datetime):
+        return value.date()
+    if isinstance(value, datetime.date):
+        return value
+    try:
+        return datetime.datetime.strptime(str(value).strip(), "%d.%m.%Y").date()
+    except ValueError:
+        return None
+
+
+def fill_cleaning_cells(property_key, checkout_date, code, hours, amount, hourly_rate, log=print):
+    """After the cleaning date has passed (post_clean.py): replaces the
+    PLACEHOLDER defaults in the departing reservation's row — V (cleaner code),
+    T (hours), U (pay) — with the real values. Only touches a row that still
+    holds the untouched placeholders (V='M-Ü', T=3.5, U='=T*12'); anything
+    Farzaneh already edited by hand is left alone.
+
+    amount: fixed pay (written as a number) or None for hourly pay, where U
+    stays a formula =T*hourly_rate. Returns "filled", "not_found",
+    "already_custom" or "cancelled"."""
+    path = os.path.join(DATA_DIR, PROPERTY_FILES[property_key])
+    wb = openpyxl.load_workbook(path)
+    checkout_col_name = FIELD_HEADERS["checkout"]
+    result = "not_found"
+    for sheet_name in ["1", "2", "3", "4", FUTURE_YEAR_SHEET]:
+        if sheet_name not in wb.sheetnames:
+            continue
+        ws = wb[sheet_name]
+        header_map = _build_header_map(next(ws.iter_rows(min_row=1, max_row=1, values_only=True)))
+        checkout_col = header_map.get(checkout_col_name)
+        flag_col = header_map.get(FIELD_HEADERS["cancelled"])
+        if checkout_col is None:
+            continue
+        for row in range(2, ws.max_row + 1):
+            value = ws.cell(row=row, column=checkout_col + 1).value
+            row_date = _to_date_cell(value)
+            if row_date != checkout_date:
+                continue
+            if flag_col is not None and str(ws.cell(row=row, column=flag_col + 1).value).strip().lower() == "ja":
+                result = "cancelled"
+                continue
+            v_cell, t_cell, u_cell = (ws.cell(row=row, column=column_index_from_string(c)) for c in ("V", "T", "U"))
+            is_placeholder = (v_cell.value == EXPLICIT_LITERALS["V"] and t_cell.value == EXPLICIT_LITERALS["T"]
+                              and str(u_cell.value).replace(" ", "") == f"=T{row}*12")
+            if not is_placeholder:
+                log(f"    GästeListe {property_key} {checkout_date}: V/T/U schon von Hand gesetzt — unverändert")
+                return "already_custom"
+            backup_file(path)
+            v_cell.value = code
+            t_cell.value = hours
+            u_cell.value = amount if amount is not None else f"=T{row}*{hourly_rate:g}"
+            save_workbook_atomic(wb, path)
+            log(f"    GästeListe {property_key} {checkout_date}: Zeile {row} (Blatt {sheet_name}): V={code}, "
+                f"T={hours}, U={amount if amount is not None else f'=T*{hourly_rate:g}'}")
+            return "filled"
+    return result
+
+
 def update_reservation_fields(property_key, confirmation_code, updates: dict, log=print):
     """Locates a row by confirmation code and updates only the given fields
     (e.g. from the manual-completion form: real guest_name/guest_email/

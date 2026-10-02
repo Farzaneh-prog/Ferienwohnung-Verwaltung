@@ -10,6 +10,7 @@ blind polling:
     * a request nobody answered -> check again 1h after it was sent
       (silence counts like "Vielleicht", the next person is asked)
     * a decision held back by quiet hours (22:00-08:00) -> check at 08:00
+- 09:00 post-clean: real cleaner/hours/pay into GästeListe T/U/V (post_clean.py)
 - 18:00 daily digest e-mail to the owner (owner_alerts.send_daily_digest).
 - DAILY JOBS (Europe/Berlin): 16:00 check + reminders for tomorrow's
   cleanings + contract warnings; 19:00 cancellations nobody replaced + late
@@ -102,6 +103,21 @@ def run_digest_job() -> None:
         _log(f"[scheduler] ERROR in daily digest: {exc!r}")
 
 
+def run_post_clean_job() -> None:
+    """09:00: GästeListe columns V/T/U for the cleanings that already happened."""
+    from . import clock_guard, post_clean
+
+    if not is_dry_run() and not clock_guard.ok_to_send():
+        _log("[scheduler] post-clean SKIPPED — system clock is off")
+        return
+    try:
+        results = post_clean.run_post_clean(dry_run=is_dry_run(), log=_log)
+        _log(f"[scheduler] post-clean done ({'dry-run' if is_dry_run() else 'LIVE'}): "
+             f"{[(p, str(d), o) for p, d, o in results if o != 'no_cleaner_in_putzplan'] or 'nothing to fill'}")
+    except Exception as exc:  # noqa: BLE001
+        _log(f"[scheduler] ERROR in post-clean job: {exc!r}")
+
+
 def trigger_check(reason: str = "event") -> None:
     """Event hook for routes (import, cancellation, manual search): run a
     check right away in a background thread. No-op if the scheduler is off."""
@@ -172,6 +188,8 @@ def start_scheduler():
             scheduler.add_job(run_evening_job, CronTrigger(hour=hour, minute=0, timezone=BERLIN_PYTZ),
                               args=[hour], id=f"evening-{hour}", max_instances=1, coalesce=True,
                               misfire_grace_time=1800)
+        scheduler.add_job(run_post_clean_job, CronTrigger(hour=9, minute=0, timezone=BERLIN_PYTZ),
+                          id="post-clean-09", max_instances=1, coalesce=True, misfire_grace_time=3600)
         scheduler.add_job(run_digest_job, CronTrigger(hour=18, minute=0, timezone=BERLIN_PYTZ),
                           id="digest-18", max_instances=1, coalesce=True, misfire_grace_time=1800)
         scheduler.add_job(lambda: __import__("app.clock_guard", fromlist=["check"]).check(

@@ -9,7 +9,7 @@ Calendar"; once added, iOS itself fires a real alarm/notification at the
 event's start time — no push-notification service or paid API needed.
 
 Decisions Farzaneh made explicitly (do not change without asking her):
-- Sent from her own Gmail (far.samsami@gmail.com) via an App Password.
+- Sent from her own Gmail account via an App Password.
 - **Not** a daily cron/scheduler check — she revised this 2026-09-25 while
   phase 2 was being built: the reminder email goes out immediately when a
   reservation is written (see the hook in xlsx_writer.process_batch), not

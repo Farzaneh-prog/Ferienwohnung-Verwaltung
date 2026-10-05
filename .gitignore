@@ -27,10 +27,9 @@ venv/
 
 # Excel lock files
 ~$*.xlsx
-wordpress-plugin/marktresidenz-secrets.php
 
 # Real platform account/listing identifiers — operational business info,
-# not published alongside the generic template in docs/cowork-command.md
+# local-only notes (never published)
 docs/cowork-command.local.md
 
 # Local Claude Code settings (permission rules for this machine)
@@ -38,3 +37,4 @@ docs/cowork-command.local.md
 
 # Internal operations/hand-over notes (real names, home-network details) — local only
 docs/STATUS.md
+wordpress-plugin/

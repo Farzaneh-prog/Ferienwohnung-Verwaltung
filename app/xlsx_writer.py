@@ -1,8 +1,7 @@
 """
-Shared safe-write logic for the real GästeListe_*.xlsx files — used by both
-the Cowork pipeline (tools/apply_incoming.py) and the manual CSV/XLS import
-(app/routes_import.py), so there is exactly one place that knows how to
-touch these files safely.
+Shared safe-write logic for the real GästeListe_*.xlsx files — used by the
+manual CSV/XLS import and the dashboard actions, so there is exactly one
+place that knows how to touch these files safely.
 
 Safety rules (see README "Excel-Dateigröße" section and project history):
 - Never inserts or deletes a row in the middle of a sheet (openpyxl does not
@@ -312,7 +311,7 @@ def append_reservation(ws, header_map, entry, log=print):
     # is edited later.
     guest_paid = entry.get("guest_paid_total")
     if guest_paid is None:
-        guest_paid = entry.get("paid_amount")  # fallback for older Cowork-queue entries
+        guest_paid = entry.get("paid_amount")  # fallback for older entries
     if guest_paid is not None:
         tourist_tax_col = header_map.get(FIELD_HEADERS["tourist_tax"])
         if tourist_tax_col is not None:
@@ -416,7 +415,7 @@ def _best_effort(func, *args, log=print, **kwargs):
 def process_batch(new_reservations, cancellations, log=print):
     """Apply a batch of reservations/cancellations across however many
     properties they touch, backing up each touched file exactly once. Used
-    by both the Cowork pipeline and the manual CSV/XLS import.
+    by the manual CSV/XLS import.
 
     Also updates Putzplan2026.xlsx (the cleaner schedule) — a new
     reservation gets a Putzplan row, a cancellation gets its matching row

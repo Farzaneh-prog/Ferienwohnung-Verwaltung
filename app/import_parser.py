@@ -1,8 +1,7 @@
 """
 Parses the official reservation exports from Booking.com and Airbnb into a
-common shape (matching the same fields used by tools/apply_incoming.py, so
-both the Cowork pipeline and this manual-upload pipeline share one apply
-step). No scraping, no AI reading a screenshot — these are the platforms'
+common shape that app/xlsx_writer.py applies. No scraping, no AI reading a
+screenshot — these are the platforms'
 own structured export files, downloaded by hand whenever convenient
 (weekly, every few days, whatever). See docs/data-sources.md for how each
 field was verified against a real reservation before being trusted.
@@ -207,7 +206,7 @@ def parse_airbnb_csv(path):
     (booking) rows.
 
     Field mapping verified against a real Airbnb 'Einkünfte' breakdown
-    (see docs/cowork-command.md history): Betrag = host payout,
+    (checked against the real earnings statement): Betrag = host payout,
     Servicegebühr = total platform fee (incl. VAT), Reinigungsgebühr =
     cleaning fee charged to guest. guest_paid_total is reconstructed as
     Betrag + Servicegebühr (verified to match exactly: 168.81 + 38.19 =

@@ -11,6 +11,7 @@ blind polling:
       (silence counts like "Vielleicht", the next person is asked)
     * a decision held back by quiet hours (22:00-08:00) -> check at 08:00
 - Mondays 16:00 post-clean: real cleaner/hours/pay into GästeListe T/U/V (post_clean.py)
+- 1st of month 08:00: Twilio cost report e-mail; daily 16:00: low-balance warning (billing.py)
 - 18:00 daily digest e-mail to the owner (owner_alerts.send_daily_digest).
 - DAILY JOBS (Europe/Berlin): 16:00 check + reminders for tomorrow's
   cleanings + contract warnings; 19:00 cancellations nobody replaced + late
@@ -80,6 +81,13 @@ def run_evening_job(hour: int) -> None:
     from . import clock_guard, day_before
 
     clock_guard.check(notify=not is_dry_run(), log=_log)
+    if hour < 19 and not is_dry_run():
+        from . import billing
+
+        try:
+            billing.check_balance(log=_log)
+        except Exception as exc:  # noqa: BLE001
+            _log(f"[scheduler] ERROR in balance check: {exc!r}")
     if not is_dry_run() and not clock_guard.ok_to_send():
         _log(f"[scheduler] evening job {hour}:00 SKIPPED — system clock is off")
         return
@@ -116,6 +124,16 @@ def run_post_clean_job() -> None:
              f"{[(p, str(d), o) for p, d, o in results if o != 'no_cleaner_in_putzplan'] or 'nothing to fill'}")
     except Exception as exc:  # noqa: BLE001
         _log(f"[scheduler] ERROR in post-clean job: {exc!r}")
+
+
+def run_monthly_report_job() -> None:
+    from . import billing
+
+    try:
+        sent = billing.monthly_report(log=_log)
+        _log(f"[scheduler] monthly Twilio cost report {'sent' if sent else 'NOT sent'}")
+    except Exception as exc:  # noqa: BLE001
+        _log(f"[scheduler] ERROR in monthly report: {exc!r}")
 
 
 def trigger_check(reason: str = "event") -> None:
@@ -190,6 +208,8 @@ def start_scheduler():
                               misfire_grace_time=1800)
         scheduler.add_job(run_post_clean_job, CronTrigger(day_of_week="mon", hour=16, minute=0, timezone=BERLIN_PYTZ),
                           id="post-clean-weekly", max_instances=1, coalesce=True, misfire_grace_time=3600)
+        scheduler.add_job(run_monthly_report_job, CronTrigger(day=1, hour=8, minute=0, timezone=BERLIN_PYTZ),
+                          id="billing-monthly", max_instances=1, coalesce=True, misfire_grace_time=6 * 3600)
         scheduler.add_job(run_digest_job, CronTrigger(hour=18, minute=0, timezone=BERLIN_PYTZ),
                           id="digest-18", max_instances=1, coalesce=True, misfire_grace_time=1800)
         scheduler.add_job(lambda: __import__("app.clock_guard", fromlist=["check"]).check(

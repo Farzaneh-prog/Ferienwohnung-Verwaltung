@@ -179,3 +179,7 @@ liegen nur auf der eigenen Hardware (als Volume gemountet). Produktions-Einstieg
 Live seit 2026-10-05. Offen/als Nächstes: ein ansprechenderes Frontend (die Oberfläche
 ist bewusst minimal), Erweiterungen der Abrechnung und Feinschliff an Vorlagen und
 Berichten. Die komplette Entscheidungs- und Fehlerhistorie steht in `docs/STATUS.md`.
+
+## Kontakt
+
+Farzaneh Samsami — [LinkedIn](https://www.linkedin.com/in/farzaneh-samsami)

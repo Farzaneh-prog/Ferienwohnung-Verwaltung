@@ -35,3 +35,6 @@ docs/cowork-command.local.md
 
 # Local Claude Code settings (permission rules for this machine)
 .claude/settings.local.json
+
+# Internal operations/hand-over notes (real names, home-network details) — local only
+docs/STATUS.md

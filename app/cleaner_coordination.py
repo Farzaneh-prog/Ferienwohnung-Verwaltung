@@ -259,6 +259,16 @@ def _followup() -> None:
             print(f"    [cleaner-coordination] WARN — followup scheduling failed: {exc!r}", flush=True)
 
 
+def pre_assign(property_key: str, checkout_date: datetime.date, cleaner_id: str) -> None:
+    """Registers "this cleaner does this date" BEFORE the booking is in the
+    system: when the Putzplan row appears (day_before.on_new_reservation) column
+    A is filled automatically and the row never enters the search chain."""
+    with STATE_LOCK:
+        state = _load_state()
+        state.setdefault("pre_assigned", {})[_state_key(property_key, checkout_date)] = cleaner_id
+        _save_state(state)
+
+
 def start_manual_search(property_key: str, checkout_date: datetime.date, now: datetime.datetime = None,
                         dry_run: bool = False, log=print) -> dict:
     """Dashboard's "find a cleaner for this date" (Putz-Alerts page): starts

@@ -28,7 +28,7 @@ import datetime
 
 from . import cleaner_coordination as cc
 from . import putzplan_writer, whatsapp_sender
-from .cleaner_roster import load_roster, match_cleaner
+from .cleaner_roster import load_roster, match_cleaner, sheet_label
 from .config import PROPERTY_LABELS
 from .owner_alerts import notify_owner
 from .tz import BERLIN
@@ -161,6 +161,18 @@ def on_new_reservation(property_key: str, checkout_date, revived_cleaner_code, n
     with cc.STATE_LOCK:
         state = cc._load_state()
         key = cc._state_key(property_key, checkout_date)
+        pre = state.get("pre_assigned", {}).get(key)
+        if pre and pre in roster and not (cc.test_mode() and not state["rows"].get(key, {}).get("test")):
+            # Pre-assigned by the owner before the booking existed: write the
+            # name into Putzplan column A right away (data, not a message — so
+            # also in dry-run) and keep the row out of the search chain.
+            putzplan_writer.assign_cleaner(property_key, checkout_date, sheet_label(roster[pre]), log=log)
+            cc._row_state(state, key)["confirmed_cleaner_id"] = pre
+            state["pre_assigned"].pop(key)
+            cc._save_state(state)
+            notify_owner(f"Vorab-Zuweisung angewendet: {roster[pre]['name']} → {cc._label(property_key, checkout_date)}",
+                         log=log)
+            return
         rs = state["rows"].get(key)
         if not rs or not rs.get("cancelled") or (cc.test_mode() and not rs.get("test")):
             return

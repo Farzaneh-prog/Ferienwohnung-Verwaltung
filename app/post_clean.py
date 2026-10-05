@@ -16,8 +16,9 @@ Rules (agreed with Farzaneh):
   only rows that still hold the untouched placeholders — anything edited by
   hand is left alone. Each property/date is handled once (state flag
   "excel_filled").
-- Runs daily (scheduler.py, 09:00) for every date from the cutoff up to
-  yesterday that hasn't been handled yet.
+- Runs weekly (scheduler.py, Mondays 16:00, Europe/Berlin) for every date from
+  the cutoff up to yesterday that hasn't been handled yet; the 14-day look-back
+  also covers a missed Monday.
 """
 import datetime
 import os

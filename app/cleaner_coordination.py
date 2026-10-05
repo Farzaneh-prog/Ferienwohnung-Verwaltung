@@ -269,6 +269,55 @@ def pre_assign(property_key: str, checkout_date: datetime.date, cleaner_id: str)
         _save_state(state)
 
 
+def assign_by_owner(property_key: str, checkout_date: datetime.date, cleaner_id: str, log=print) -> str:
+    """Dashboard "who does it" (owner decides before/instead of the search).
+    - Putzplan row exists, column A empty -> written now, row confirmed, the
+      search for it stops.
+    - Row exists and someone is already in column A -> nothing changes.
+    - No row yet (booking not imported) -> remembered (pre_assign) and applied
+      the moment the row appears.
+    Returns "assigned" | "already:<name>" | "pre_assigned"."""
+    from . import putzplan_writer
+
+    roster = load_roster()
+    info = putzplan_writer.find_active_row(property_key, checkout_date)
+    if info is None:
+        pre_assign(property_key, checkout_date, cleaner_id)
+        return "pre_assigned"
+    if info["cleaner"]:
+        return f"already:{info['cleaner']}"
+    putzplan_writer.assign_cleaner(property_key, checkout_date, sheet_label(roster[cleaner_id]), log=log)
+    with STATE_LOCK:
+        state = _load_state()
+        row_state = _row_state(state, _state_key(property_key, checkout_date))
+        row_state["confirmed_cleaner_id"] = cleaner_id
+        row_state["reopened"] = False
+        # A search may already be running (booking imported a moment ago):
+        # tell everyone who was asked and hasn't declined that it is taken.
+        asked = {a["cleaner_id"] for a in row_state.get("attempts", [])
+                 if a["cleaner_id"] != cleaner_id and a.get("response") not in ("nein",)}
+        _save_state(state)
+    for other_id in sorted(asked):
+        other = roster.get(other_id)
+        if other and other.get("whatsapp_number"):
+            try:
+                whatsapp_sender.send_template(
+                    other["whatsapp_number"], "taken",
+                    {"1": other["name"], "2": checkout_date.strftime("%d.%m.%Y"),
+                     "3": PROPERTY_LABELS.get(property_key, property_key)})
+            except Exception as exc:  # noqa: BLE001
+                log(f"    [cleaner-coordination] WARN — 'vergeben' an {other['name']} fehlgeschlagen: {exc}")
+    notify_owner(f"Von Hand zugewiesen: {roster[cleaner_id]['name']} → {_label(property_key, checkout_date)}", log=log)
+    return "assigned"
+
+
+def remove_pre_assignment(property_key: str, checkout_date: datetime.date) -> None:
+    with STATE_LOCK:
+        state = _load_state()
+        state.get("pre_assigned", {}).pop(_state_key(property_key, checkout_date), None)
+        _save_state(state)
+
+
 def start_manual_search(property_key: str, checkout_date: datetime.date, now: datetime.datetime = None,
                         dry_run: bool = False, log=print) -> dict:
     """Dashboard's "find a cleaner for this date" (Putz-Alerts page): starts

@@ -466,3 +466,22 @@ def iter_assigned_rows(checkout_date):
             }
     finally:
         wb.close()
+
+
+def find_active_row(property_key, checkout_date):
+    """None if there is no non-storniert Putzplan row for this property/date,
+    else {"cleaner": <column A value or None>}. Read-only."""
+    wohnung = PUTZPLAN_WOHNUNG_LABELS.get(property_key)
+    path = _putzplan_path()
+    if wohnung is None or checkout_date is None or not os.path.exists(path):
+        return None
+    wb = openpyxl.load_workbook(path, read_only=False, data_only=True)
+    try:
+        ws = wb[PUTZPLAN_SHEET]
+        row = _find_row_by_date(ws, wohnung, format_date_de(checkout_date))
+        if row is None:
+            return None
+        value = ws.cell(row=row, column=COL_WER).value
+        return {"cleaner": str(value).strip() if value else None}
+    finally:
+        wb.close()

@@ -193,8 +193,13 @@ def alerts_list():
         if code and status in ("noch nicht gestartet",):
             status = f"im Putzplan eingetragen: {code}"
         statuses[a["id"]] = status
+    pre = []
+    for key, cid in sorted(state.get("pre_assigned", {}).items()):
+        property_key, date_str = key.split("|", 1)
+        pre.append({"property": property_key, "date": date_str, "cleaner": roster.get(cid, {}).get("name", cid)})
     return render_template("alerts.html", alerts=alerts, statuses=statuses, property_labels=PROPERTY_LABELS,
-                           automation_on=scheduler.is_enabled(), dry_run=scheduler.is_dry_run())
+                           automation_on=scheduler.is_enabled(), dry_run=scheduler.is_dry_run(),
+                           cleaners={cid: c["name"] for cid, c in roster.items()}, pre_assigned=pre)
 
 
 @bp.route("/alerts", methods=["POST"])
@@ -212,6 +217,41 @@ def alerts_add():
                 flash("Suche nach Putzkraft gestartet." if not scheduler.is_dry_run() else "Dry-Run: Suche würde starten.")
             except Exception as exc:  # noqa: BLE001
                 flash(f"Suche konnte nicht gestartet werden: {exc}")
+    return redirect(url_for("workflow.alerts_list"))
+
+
+@bp.route("/alerts/assign", methods=["POST"])
+@login_required
+def assign_cleaner_form():
+    """Owner already knows who does a (new) booking: tell the system before it
+    starts searching. Works before the booking is imported (remembered) and
+    after (written to Putzplan at once)."""
+    property_key = request.form.get("property")
+    d = _parse_form_date(request.form.get("date"))
+    cleaner_id = request.form.get("cleaner")
+    roster = load_roster()
+    if property_key in PROPERTY_LABELS and d and cleaner_id in roster:
+        result = cc.assign_by_owner(property_key, d, cleaner_id)
+        name = roster[cleaner_id]["name"]
+        if result == "assigned":
+            flash(f"{name} ist für {d:%d.%m.%Y} eingetragen (Putzplan Spalte A). Keine Suche nötig.")
+        elif result == "pre_assigned":
+            flash(f"Gespeichert: {name} für {d:%d.%m.%Y}. Sobald die Buchung importiert ist, wird sie eingetragen "
+                  f"und es gibt keine Suche.")
+        else:
+            flash(f"Dieser Tag hat schon eine Putzkraft im Putzplan ({result.split(':', 1)[1]}) — nichts geändert.")
+    else:
+        flash("Ungültige Eingabe.")
+    return redirect(url_for("workflow.alerts_list"))
+
+
+@bp.route("/alerts/assign/delete", methods=["POST"])
+@login_required
+def assign_cleaner_delete():
+    property_key = request.form.get("property")
+    d = _parse_form_date(request.form.get("date"))
+    if property_key in PROPERTY_LABELS and d:
+        cc.remove_pre_assignment(property_key, d)
     return redirect(url_for("workflow.alerts_list"))
 
 

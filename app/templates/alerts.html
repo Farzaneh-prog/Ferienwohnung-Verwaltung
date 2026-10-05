@@ -51,6 +51,41 @@
   </div>
 
   <div class="add-card">
+    <b>مشخص‌کردن نظافتچی (قبل از جستجو)</b>
+    <form method="post" action="{{ url_for('workflow.assign_cleaner_form') }}">
+      <div>
+        <label>ملک</label>
+        <select name="property">
+          {% for key, label in property_labels.items() %}
+            <option value="{{ key }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label>تاریخ خروج (Abreise)</label>
+        <input type="date" name="date" required>
+      </div>
+      <div>
+        <label>چه کسی انجام می‌دهد</label>
+        <select name="cleaner">
+          {% for cid, name in cleaners.items() %}<option value="{{ cid }}">{{ name }}</option>{% endfor %}
+        </select>
+      </div>
+      <button type="submit">ثبت (بدون جستجو)</button>
+    </form>
+    {% for p in pre_assigned %}
+      <div class="alert-card" style="margin-top:0.6rem">
+        <div class="info"><b>{{ property_labels.get(p.property, p.property) }} — {{ p.date }}</b>
+          <span>{{ p.cleaner }} — منتظر ورود رزرو</span></div>
+        <form method="post" action="{{ url_for('workflow.assign_cleaner_delete') }}" style="display:block">
+          <input type="hidden" name="property" value="{{ p.property }}"><input type="hidden" name="date" value="{{ p.date }}">
+          <button class="resolve" type="submit">حذف</button>
+        </form>
+      </div>
+    {% endfor %}
+  </div>
+
+  <div class="add-card">
     <b>اعلام کنسلی</b>
     <form method="post" action="{{ url_for('workflow.cancellation_report') }}">
       <div>

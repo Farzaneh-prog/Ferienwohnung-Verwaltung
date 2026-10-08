@@ -87,27 +87,49 @@ def _classify(*candidates: str):
     return None
 
 
-_ACK_CORE = {"danke", "dankeschön", "dankeschoen", "vielen", "dank", "thx", "thanks", "merci", "ok", "okay",
-             "oke", "alles", "klar", "verstanden", "kenntnis", "genommen", "gelesen", "passt", "gut", "super",
-             "prima", "perfekt", "gerne", "ordnung"}
-_ACK_FILLER = {"hallo", "hi", "hey", "moin", "guten", "tag", "abend", "liebe", "lieber", "grüße", "grüsse",
-               "gruß", "gruss", "lg", "mfg", "ich", "habe", "es", "zur", "das", "ist", "in", "dir", "euch", "sehr",
-               "für", "die", "info", "nachricht", "erinnerung"}
-_ACK_EMOJI = ("👍", "🙏", "✅", "👌", "😊", "🙂", "❤️", "❤", "🤝")
+# Plain acknowledgements (German only — decided with Farzaneh 2026-10-08).
+# A message counts only if EVERY word is in one of the sets below and at least
+# one word is a CORE word; anything unknown ("Schlüssel", "krank", "später" on
+# its own, "nicht", "kein", "ja", numbers, "?") makes it a real message that is
+# forwarded to the owner as before.
+_ACK_PHRASES = {  # multi-word forms that would otherwise contain unknown words
+    "kein problem": "ok", "bis dann": "ok", "bis morgen": "ok", "bis bald": "ok", "bis später": "ok",
+    "mache ich": "ok", "mach ich": "ok", "wird gemacht": "ok", "geht klar": "ok", "passt so": "ok",
+}
+_ACK_CORE = {
+    # thanks
+    "danke", "dankeschön", "dankeschoen", "dank", "merci", "thx",
+    # understood / fine
+    "ok", "okay", "oke", "klar", "gut", "bestens", "verstanden", "super", "prima", "perfekt", "passt",
+    "ordnung", "sicher", "selbstverständlich", "natürlich",
+    # informed / done
+    "kenntnis", "genommen", "gelesen", "notiert", "bescheid", "informiert", "gemacht", "erledigt",
+    # agreeing
+    "gerne",
+}
+_ACK_FILLER = {
+    "alles", "vielen", "herzlichen", "besten", "sehr", "schön", "schoen", "dir", "ihnen", "euch", "dich",
+    "hallo", "hi", "hey", "moin", "guten", "tag", "morgen", "abend", "liebe", "lieber", "grüße", "grüsse",
+    "gruß", "gruss", "viele", "schöne", "schönen", "feierabend", "lg", "mfg", "ciao",
+    "ich", "habe", "es", "zur", "das", "ist", "in", "für", "die", "der", "info", "nachricht", "erinnerung",
+    "wird", "weiß", "weiss", "bin", "so", "auch", "schon", "mal", "so",
+}
+_ACK_EMOJI = ("👍", "👌", "🙏", "✅", "😊", "🙂", "😀", "😃", "😄", "❤️", "❤", "💪", "🤝", "👏", "🙌")
 
 
 def is_acknowledgement(text: str) -> bool:
     """True for a plain "thanks / ok / 👍 / zur Kenntnis genommen" — nothing
     the owner needs to act on, so no automatic "please use the buttons" reply
-    and no 💬 forward (only a quiet line in the digest). Deliberately strict:
-    every word must be a known thanks/ack/greeting word, no question mark, no
-    digits, nothing like "ja"/"nein"/"nicht" — anything else is treated as a
-    real message and forwarded as before."""
+    and no 💬 forward (only a quiet line in the digest). Deliberately strict —
+    see the word sets above."""
     t = (text or "").strip().lower()
     if not t or len(t) > 100 or "?" in t or any(ch.isdigit() for ch in t):
         return False
     for emoji in _ACK_EMOJI:
         t = t.replace(emoji, " ok ")
+    t = re.sub(r"\s+", " ", t)
+    for phrase, replacement in _ACK_PHRASES.items():
+        t = t.replace(phrase, replacement)
     tokens = re.findall(r"[a-zäöüß]+", t)
     if not tokens or not any(tok in _ACK_CORE for tok in tokens):
         return False

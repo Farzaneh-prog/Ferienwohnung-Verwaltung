@@ -36,11 +36,15 @@
     {% for r in rows %}
       <div class="card">
         <h3>{{ property_labels.get(property_key, property_key) }} — {{ r.platform }}</h3>
-        <div class="meta">{{ r.checkin }} → {{ r.checkout }} · کد: {{ r.confirmation_code }}</div>
+        <div class="meta">{{ r.checkin }} → {{ r.checkout }} · کد: {{ r.confirmation_code }}
+          {% if r.guest_name %}· <b>{{ r.guest_name }}</b>{% endif %}
+          · <span style="color:#f4b400">ناقص:
+            {% if 'name' in r.missing %}اسم{% endif %}{% if 'name' in r.missing and 'adults' in r.missing %}، {% endif %}{% if 'adults' in r.missing %}تعداد بزرگسال{% endif %}</span></div>
         <form method="post" action="{{ url_for('workflow.complete_submit', property_key=property_key, code=r.confirmation_code) }}">
           <div>
             <label>اسم مهمان</label>
-            <input type="text" name="guest_name" placeholder="اسم کامل مهمان">
+            <input type="text" name="guest_name" placeholder="اسم کامل مهمان"
+                   value="{{ r.guest_name if r.guest_name and 'name' not in r.missing else '' }}">
           </div>
           <div>
             <label>ایمیل مهمان</label>
@@ -49,11 +53,11 @@
           <div class="row">
             <div>
               <label>بزرگسال</label>
-              <input type="number" name="adults" min="0">
+              <input type="number" name="adults" min="0" value="{{ r.adults if r.adults not in (none, '') else '' }}">
             </div>
             <div>
               <label>کودک زیر ۱۸</label>
-              <input type="number" name="children" min="0">
+              <input type="number" name="children" min="0" value="{{ r.children if r.children not in (none, '') else '' }}">
             </div>
           </div>
           <button type="submit">ذخیره</button>

@@ -100,11 +100,27 @@ def _sort_key(reservation):
 
 
 def find_incomplete_reservations(property_key: str) -> list:
-    """Reservations imported via CSV/XLS that still need a manual pass
-    (placeholder guest name — see app/import_parser.py)."""
+    """Reservations imported via CSV/XLS that still need a manual pass:
+    a placeholder guest name (see app/import_parser.py) OR no adult count.
+    Airbnb exports carry the guest's real name but never the headcount (found
+    2026-10-08: "Raik Kasper" had a real name, adults empty, and the page said
+    there was nothing to complete) — and the Putzplan / cleaner reminders need
+    that headcount. Cancelled rows are skipped. Each returned dict gets a
+    "missing" list ("name", "adults") for the page."""
     from .import_parser import is_placeholder_name  # local import: avoids a cycle
 
-    return [r for r in load_reservations(property_key) if is_placeholder_name(r.get("guest_name"))]
+    incomplete = []
+    for r in load_reservations(property_key):
+        if str(r.get("cancelled") or "").strip().lower() == "ja":
+            continue
+        missing = []
+        if is_placeholder_name(r.get("guest_name")):
+            missing.append("name")
+        if r.get("adults") in (None, ""):
+            missing.append("adults")
+        if missing:
+            incomplete.append(dict(r, missing=missing))
+    return incomplete
 
 
 def get_existing_confirmation_codes(property_key: str) -> set:

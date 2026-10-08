@@ -24,6 +24,7 @@ Content Template is needed for them.
 """
 import datetime
 import os
+import re
 
 from flask import Blueprint, request, Response
 from twilio.request_validator import RequestValidator
@@ -86,6 +87,33 @@ def _classify(*candidates: str):
     return None
 
 
+_ACK_CORE = {"danke", "dankeschön", "dankeschoen", "vielen", "dank", "thx", "thanks", "merci", "ok", "okay",
+             "oke", "alles", "klar", "verstanden", "kenntnis", "genommen", "gelesen", "passt", "gut", "super",
+             "prima", "perfekt", "gerne", "ordnung"}
+_ACK_FILLER = {"hallo", "hi", "hey", "moin", "guten", "tag", "abend", "liebe", "lieber", "grüße", "grüsse",
+               "gruß", "gruss", "lg", "mfg", "ich", "habe", "es", "zur", "das", "ist", "in", "dir", "euch", "sehr",
+               "für", "die", "info", "nachricht", "erinnerung"}
+_ACK_EMOJI = ("👍", "🙏", "✅", "👌", "😊", "🙂", "❤️", "❤", "🤝")
+
+
+def is_acknowledgement(text: str) -> bool:
+    """True for a plain "thanks / ok / 👍 / zur Kenntnis genommen" — nothing
+    the owner needs to act on, so no automatic "please use the buttons" reply
+    and no 💬 forward (only a quiet line in the digest). Deliberately strict:
+    every word must be a known thanks/ack/greeting word, no question mark, no
+    digits, nothing like "ja"/"nein"/"nicht" — anything else is treated as a
+    real message and forwarded as before."""
+    t = (text or "").strip().lower()
+    if not t or len(t) > 100 or "?" in t or any(ch.isdigit() for ch in t):
+        return False
+    for emoji in _ACK_EMOJI:
+        t = t.replace(emoji, " ok ")
+    tokens = re.findall(r"[a-zäöüß]+", t)
+    if not tokens or not any(tok in _ACK_CORE for tok in tokens):
+        return False
+    return all(tok in _ACK_CORE or tok in _ACK_FILLER for tok in tokens)
+
+
 def _fmt(property_key: str, checkout_date: datetime.date) -> str:
     return f"{checkout_date.strftime('%d.%m.%Y')}, {PROPERTY_LABELS.get(property_key, property_key)}"
 
@@ -129,6 +157,10 @@ def incoming_whatsapp():
             # sender's number so she can answer directly.
             body = (request.form.get("Body") or "").strip()
             media = int(request.form.get("NumMedia") or 0)
+            if not media and is_acknowledgement(body):
+                # a plain "danke / ok / 👍": log it quietly, no reply, no forward
+                notify_owner(f"👍 {roster[cleaner_id]['name']}: „{body}“")
+                return _twiml()
             note = f"„{body}“" if body else ""
             if media:
                 note = (note + " " if note else "") + f"[{media} Anhang/Sprachnachricht — im Automaten nicht lesbar]"

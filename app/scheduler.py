@@ -176,6 +176,11 @@ def schedule_followups() -> None:
             # test) or is picked up by the startup check after a restart.
             if due > now:
                 wanted[f"followup:{key}"] = due
+        broadcasts = [a["sent_at"] for a in attempts if a.get("stage") == "broadcast"]
+        if broadcasts and "broadcast_no_yes" not in rs.get("alerts_sent", []):
+            alert_at = datetime.datetime.fromisoformat(min(broadcasts)) + cc.BROADCAST_ALERT_AFTER
+            if alert_at > now:
+                wanted[f"followup:{key}:14h"] = alert_at + datetime.timedelta(seconds=30)
         if rs.get("held_quiet"):
             held_quiet = True
     if held_quiet:

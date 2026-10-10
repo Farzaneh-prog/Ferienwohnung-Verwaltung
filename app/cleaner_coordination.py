@@ -92,6 +92,11 @@ def test_mode() -> bool:
     Putzplan rows and real cleaners are left completely alone."""
     return bool(os.environ.get("SCHEDULER_ONLY_CLEANERS", "").strip())
 
+# A broadcast went out and nobody said Ja (or Nein) for this long -> warn the
+# owner (decided with Farzaneh 2026-10-10; silence/"Vielleicht" never produced an
+# alert before, only "everyone said Nein" or the day after the cleaning did).
+BROADCAST_ALERT_AFTER = datetime.timedelta(hours=14)
+
 QUIET_HOURS_START = datetime.time(22, 0)  # Europe/Berlin
 QUIET_HOURS_END = datetime.time(8, 0)
 
@@ -259,6 +264,12 @@ def decide_next_action(property_key: str, checkout_date: datetime.date, roster: 
         targets = [cid for cid in chain if cid not in declined and cid not in asked_in_broadcast]
         if not targets:
             if asked_in_broadcast and not all(cid in declined for cid in chain):
+                first_broadcast = min(datetime.datetime.fromisoformat(a["sent_at"]) for a in attempts
+                                      if a.get("stage") == "broadcast")
+                if now - first_broadcast >= BROADCAST_ALERT_AFTER:
+                    if _in_quiet_hours(now):  # not at night: held until 08:00 like everything else
+                        return {"action": "none", "reason": "quiet_hours"}
+                    return {"action": "alert_owner", "reason": "broadcast_no_yes"}
                 return {"action": "none", "reason": "broadcast_already_sent"}
             return {"action": "alert_owner", "reason": "everyone_declined"}
         if _in_quiet_hours(now):
@@ -663,6 +674,8 @@ _ALERT_TEXT = {
     "no_eligible_cleaner": "Niemand ist für {label} verfügbar — bitte manuell zuweisen.",
     "everyone_declined": "Alle haben für {label} abgesagt — bitte manuell zuweisen.",
     "checkout_passed_unresolved": "{label}: Datum erreicht, keine Reinigung zugewiesen!",
+    "broadcast_no_yes": "{label}: Broadcast ging vor über 14 Stunden raus, noch keine Zusage — bitte prüfen "
+                        "oder manuell zuweisen.",
 }
 
 

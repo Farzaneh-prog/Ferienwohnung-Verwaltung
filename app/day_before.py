@@ -254,8 +254,39 @@ def run_evening_job(hour: int, now: datetime.datetime = None, log=print) -> None
 
         if hour < CANCEL_FINAL_HOUR:
             _contract_alerts(roster, state, now.date(), dry_run, log)
+            _deadline_alerts(state, now.date(), dry_run, log)
         if not dry_run:
             cc._save_state(state)
+
+
+def _deadline_alerts(state: dict, today: datetime.date, dry_run: bool, log) -> None:
+    """16:00 daily: an open Putzplan row (no cleaner in column A, not cancelled)
+    whose cleaning is in 2 days / tomorrow / today still has nobody -> owner
+    alert, once per row and distance. Complements the alerts inside
+    cleaner_coordination (nobody eligible / everybody declined / 14 h after a
+    broadcast), which stay silent while people merely haven't answered."""
+    if cc.test_mode():
+        rows = [(k.split("|", 1)[0], datetime.date.fromisoformat(k.split("|", 1)[1]))
+                for k, rs in state["rows"].items() if rs.get("test") and not rs.get("confirmed_cleaner_id")]
+    else:
+        rows = list(putzplan_writer.iter_open_rows())
+    for property_key, d in rows:
+        days = (d - today).days
+        if days not in (0, 1, 2):
+            continue
+        key = cc._state_key(property_key, d)
+        rs = state["rows"].get(key, {})
+        if rs.get("cancelled") or rs.get("confirmed_cleaner_id"):
+            continue
+        marker = f"deadline_{days}"
+        when = {0: "HEUTE", 1: "MORGEN", 2: "in 2 Tagen"}[days]
+        text = f"⚠️ {cc._label(property_key, d)}: {when} noch niemand eingeteilt — bitte prüfen oder manuell zuweisen."
+        if dry_run:
+            log(f"    [day-before] {text} — WÜRDE gesendet (dry-run)")
+            continue
+        sent = cc._row_state(state, key).setdefault("alerts_sent", [])
+        if marker not in sent and notify_owner(text, log=log):
+            sent.append(marker)
 
 
 def _contract_alerts(roster: dict, state: dict, today: datetime.date, dry_run: bool, log) -> None:

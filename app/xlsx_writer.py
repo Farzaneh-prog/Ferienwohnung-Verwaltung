@@ -579,6 +579,40 @@ def fill_cleaning_cells(property_key, checkout_date, code, hours, amount, hourly
     return result
 
 
+def mark_cancelled_by_checkout(property_key, checkout_date, log=print):
+    """Dashboard cancellation (2026-10-10): set Storniert = ja on the guest-list
+    row(s) of this property whose checkout is `checkout_date` — exactly what an
+    import's cancellation does — so later reads never treat the booking as real.
+    The row is NOT deleted (formula safety). Returns the marked confirmation codes."""
+    path = os.path.join(DATA_DIR, PROPERTY_FILES[property_key])
+    wb = openpyxl.load_workbook(path)
+    marked = []
+    for sheet_name in ["1", "2", "3", "4", FUTURE_YEAR_SHEET]:
+        if sheet_name not in wb.sheetnames:
+            continue
+        ws = wb[sheet_name]
+        header_map = _build_header_map(next(ws.iter_rows(min_row=1, max_row=1, values_only=True)))
+        checkout_col = header_map.get(FIELD_HEADERS["checkout"])
+        flag_col = header_map.get(FIELD_HEADERS["cancelled"])
+        code_col = header_map.get(FIELD_HEADERS["confirmation_code"])
+        if checkout_col is None or flag_col is None:
+            continue
+        for row in range(2, ws.max_row + 1):
+            if _to_date_cell(ws.cell(row=row, column=checkout_col + 1).value) != checkout_date:
+                continue
+            if str(ws.cell(row=row, column=flag_col + 1).value or "").strip().lower() == "ja":
+                continue
+            ws.cell(row=row, column=flag_col + 1).value = "ja"
+            code = ws.cell(row=row, column=code_col + 1).value if code_col is not None else None
+            marked.append(str(code).strip() if code not in (None, "") else None)
+            log(f"    marked row {row} (sheet {sheet_name}) as Storniert (checkout {checkout_date}, code={code})")
+    if marked:
+        backup_file(path)
+        save_workbook_atomic(wb, path)
+        known_codes.record_codes(property_key, [c for c in marked if c])
+    return marked
+
+
 def update_reservation_fields(property_key, confirmation_code, updates: dict, log=print):
     """Locates a row by confirmation code and updates only the given fields
     (e.g. from the manual-completion form: real guest_name/guest_email/

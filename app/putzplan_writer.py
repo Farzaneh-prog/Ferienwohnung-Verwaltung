@@ -169,15 +169,48 @@ def _find_row_by_date(ws, wohnung, target_date_str, storniert=False):
     return None
 
 
+_CANCELLED_CACHE = {}
+
+
+def _cancelled_checkouts(property_key) -> set:
+    """Checkout dates of this property whose Putzplan row is flagged 'storniert'.
+    Second source of truth for "this booking is cancelled" (2026-10-10): the guest
+    list's Storniert column is only set by an import, so a cancellation reported in
+    the dashboard — or one whose guest-list row hasn't been cleaned up yet — would
+    otherwise still be read as a real booking (found when a cancelled 23.-24.10.
+    stay's headcount was copied into the Putzplan). Cached per file version."""
+    wohnung = PUTZPLAN_WOHNUNG_LABELS.get(property_key)
+    path = _putzplan_path()
+    if wohnung is None or not os.path.exists(path):
+        return set()
+    key = (property_key, os.path.getmtime(path))
+    if key not in _CANCELLED_CACHE:
+        if len(_CANCELLED_CACHE) > 20:
+            _CANCELLED_CACHE.clear()
+        found = set()
+        wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+        try:
+            for row in wb[PUTZPLAN_SHEET].iter_rows(min_row=2, values_only=True):
+                if row[COL_WOHNUNG - 1] == wohnung and str(row[COL_CHECKIN_UHR - 1] or "").strip().lower() == "storniert":
+                    d = _parse_de_date(row[COL_DATUM - 1])
+                    if d:
+                        found.add(d)
+        finally:
+            wb.close()
+        _CANCELLED_CACHE[key] = found
+    return _CANCELLED_CACHE[key]
+
+
 def _find_next_reservation(property_key, checkout_date, exclude_confirmation_code):
     """The reservation checking IN soonest at/after checkout_date, at the
     same property (excluding the departing reservation itself and any
     cancelled ones) — this is who Putzplan needs to describe."""
     candidates = []
+    cancelled_dates = _cancelled_checkouts(property_key)
     for r in load_reservations(property_key):
         if str(r.get("confirmation_code", "")).strip() == str(exclude_confirmation_code).strip():
             continue
-        if str(r.get("cancelled", "")).strip().lower() == "ja":
+        if str(r.get("cancelled", "")).strip().lower() == "ja" or _to_date(r.get("checkout")) in cancelled_dates:
             continue
         checkin_date = _to_date(r.get("checkin"))
         if checkin_date is None or checkin_date < checkout_date:
@@ -195,10 +228,11 @@ def _find_previous_departure(property_key, checkin_date, exclude_confirmation_co
     find which existing Putzplan row (dated at that departure) should now
     describe THIS reservation as its next guests."""
     candidates = []
+    cancelled_dates = _cancelled_checkouts(property_key)
     for r in load_reservations(property_key):
         if str(r.get("confirmation_code", "")).strip() == str(exclude_confirmation_code).strip():
             continue
-        if str(r.get("cancelled", "")).strip().lower() == "ja":
+        if str(r.get("cancelled", "")).strip().lower() == "ja" or _to_date(r.get("checkout")) in cancelled_dates:
             continue
         checkout_date = _to_date(r.get("checkout"))
         if checkout_date is None or checkout_date > checkin_date:

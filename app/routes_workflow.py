@@ -17,7 +17,7 @@ from .excel_reader import get_existing_confirmation_codes, find_incomplete_reser
 from .import_parser import detect_and_parse, merge_reservation_entries
 from .quick_alerts import list_alerts, add_alert, resolve_alert
 from .xlsx_writer import process_batch, update_reservation_fields
-from . import cleaner_coordination as cc, day_before, putzplan_writer, scheduler
+from . import cleaner_coordination as cc, day_before, putzplan_writer, scheduler, xlsx_writer
 from .cleaner_roster import load_roster
 
 bp = Blueprint("workflow", __name__)
@@ -291,6 +291,12 @@ def cancellation_report():
     d = _parse_form_date(request.form.get("date"))
     if property_key in PROPERTY_LABELS and d:
         flagged = putzplan_writer.flag_putzplan_cancelled(property_key, d)
+        try:  # also mark the guest-list row (as an import would), so the booking is never read again
+            marked = xlsx_writer.mark_cancelled_by_checkout(property_key, d)
+            if marked:
+                flash(f"GästeListe: Storniert = ja gesetzt ({len(marked)} Zeile).")
+        except Exception as exc:  # noqa: BLE001
+            flash(f"GästeListe konnte nicht markiert werden: {exc}")
         if flagged is None:
             flash("Kein passender Putzplan-Eintrag gefunden — nichts geändert.")
         else:

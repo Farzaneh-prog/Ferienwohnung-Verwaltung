@@ -202,6 +202,24 @@ def alerts_list():
                            cleaners={cid: c["name"] for cid, c in roster.items()}, pre_assigned=pre)
 
 
+def _register_guests_from_form(property_key, d) -> None:
+    """If the form carries the guest numbers of a not-yet-imported booking, write
+    them into the Putzplan (previous cleaning's row + the row for date `d`) —
+    shared by "start search" and "assign cleaner"."""
+    if not request.form.get("adults", "").strip().isdigit():
+        return
+    try:
+        result = putzplan_writer.register_manual_booking(
+            property_key, d, int(request.form["adults"]), int(request.form.get("children", "").strip() or 0),
+            {"ja": "Ja", "nein": "Nein"}.get(request.form.get("children_u3", "")),
+            _parse_form_date(request.form.get("checkin")))
+        if result.get("previous_date"):
+            flash(f"Putzplan: Gästezahl bei der Reinigung am {result['previous_date']:%d.%m.%Y} eingetragen"
+                  f"{' (Zeile für ' + d.strftime('%d.%m.%Y') + ' angelegt)' if result.get('created_row') else ''}.")
+    except Exception as exc:  # noqa: BLE001
+        flash(f"Gästezahl konnte nicht in den Putzplan geschrieben werden: {exc}")
+
+
 @bp.route("/alerts", methods=["POST"])
 @login_required
 def alerts_add():
@@ -211,18 +229,7 @@ def alerts_add():
     d = _parse_form_date(date_str)
     if property_key in PROPERTY_LABELS and d:
         add_alert(property_key, date_str, note)
-        if request.form.get("adults", "").strip().isdigit():
-            # guests of THIS (not yet imported) booking -> Putzplan, like an import would
-            try:
-                result = putzplan_writer.register_manual_booking(
-                    property_key, d, int(request.form["adults"]), int(request.form.get("children", "").strip() or 0),
-                    {"ja": "Ja", "nein": "Nein"}.get(request.form.get("children_u3", "")),
-                    _parse_form_date(request.form.get("checkin")))
-                if result.get("previous_date"):
-                    flash(f"Putzplan: Gästezahl bei der Reinigung am {result['previous_date']:%d.%m.%Y} eingetragen"
-                          f"{' (Zeile für ' + d.strftime('%d.%m.%Y') + ' angelegt)' if result.get('created_row') else ''}.")
-            except Exception as exc:  # noqa: BLE001
-                flash(f"Gästezahl konnte nicht in den Putzplan geschrieben werden: {exc}")
+        _register_guests_from_form(property_key, d)  # guests of THIS (not yet imported) booking -> Putzplan
         if scheduler.is_enabled():
             try:
                 cc.start_manual_search(property_key, d, dry_run=scheduler.is_dry_run())
@@ -243,6 +250,8 @@ def assign_cleaner_form():
     cleaner_id = request.form.get("cleaner")
     roster = load_roster()
     if property_key in PROPERTY_LABELS and d and cleaner_id in roster:
+        # numbers first: this also creates the Putzplan row, so the cleaner can be written into column A right away
+        _register_guests_from_form(property_key, d)
         result = cc.assign_by_owner(property_key, d, cleaner_id)
         name = roster[cleaner_id]["name"]
         if result == "assigned":

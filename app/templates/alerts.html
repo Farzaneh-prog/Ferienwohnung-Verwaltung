@@ -79,6 +79,14 @@
           {% for cid, name in cleaners.items() %}<option value="{{ cid }}">{{ name }}</option>{% endfor %}
         </select>
       </div>
+      <div class="hint" style="color:#9fb0cf;font-size:0.8rem">اگر این رزرو را هنوز آپلود نکرده‌اید: <b>تعداد مهمان‌های همین رزرو</b> را بنویسید (اختیاری)؛ در Putzplan برای نظافت قبل از ورودشان ثبت می‌شود:</div>
+      <div><label>تاریخ ورود (Anreise) این رزرو — اختیاری</label><input type="date" name="checkin"></div>
+      <div class="row" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.5rem">
+        <div><label>بزرگسال</label><input type="number" name="adults" min="0"></div>
+        <div><label>کودک زیر ۱۸</label><input type="number" name="children" min="0"></div>
+        <div><label>کودک زیر ۳؟</label>
+          <select name="children_u3"><option value="">نامشخص</option><option value="nein">نه</option><option value="ja">بله</option></select></div>
+      </div>
       <button type="submit">ثبت (بدون جستجو)</button>
     </form>
     {% for p in pre_assigned %}

@@ -302,6 +302,20 @@ def append_putzplan_row(entry, log=print):
         _sync_previous_departure(property_key, checkin_date, entry.get("adults"), entry.get("children", 0), code, log)
         return {"revived": True, "cleaner_code": cleaner_code}
 
+    # A row for this date already exists (created by hand from the dashboard,
+    # see register_manual_booking): refresh it, keep column A (cleaner).
+    existing_row = _find_row_by_date(ws, wohnung, format_date_de(checkout_date))
+    if existing_row is not None:
+        cleaner_code = ws.cell(row=existing_row, column=COL_WER).value
+        ws.cell(row=existing_row, column=COL_GLEICHER_TAG, value="Ja" if same_day else "Nein")
+        if next_adults is not None:
+            ws.cell(row=existing_row, column=COL_ERWACHSENE, value=next_adults)
+        ws.cell(row=existing_row, column=COL_KINDER_U18, value=next_children)
+        save_workbook_atomic(wb, path)
+        log(f"    Putzplan: row {existing_row} ({wohnung}, {format_date_de(checkout_date)}) already existed — updated")
+        _sync_previous_departure(property_key, checkin_date, entry.get("adults"), entry.get("children", 0), code, log)
+        return {"revived": False, "cleaner_code": cleaner_code}
+
     row = _find_insert_row(ws, checkout_date)
     ws.insert_rows(row)
 
@@ -506,3 +520,87 @@ def get_row_guests(property_key, checkout_date):
                 "children_u3": ws.cell(row=row, column=COL_KINDER_U3).value}
     finally:
         wb.close()
+
+
+def register_manual_booking(property_key, checkout_date, adults, children, children_u3=None, checkin_date=None,
+                            log=print):
+    """Dashboard "quick alert" for a booking that has NOT been imported yet
+    (2026-10-10). Does by hand what the import does in the Putzplan, so the
+    cleaning messages already carry the right numbers:
+
+      - the Putzplan row of the PREVIOUS cleaning (latest row before the new
+        booking's check-in / checkout) now describes THIS booking as its next
+        guests: columns G/H(/I) = adults, children (under 18), under-3;
+      - the row for `checkout_date` (the new booking's own cleaning) is created
+        if it doesn't exist, and its next guests are the booking that comes
+        AFTER it — taken from the guest list, else carried over from the
+        previous row's old numbers (those guests are now one cleaning later).
+
+    A later import of the booking finds the row and just refreshes it.
+    Returns {"previous_date", "created_row", "next_guests"} (best effort)."""
+    wohnung = PUTZPLAN_WOHNUNG_LABELS.get(property_key)
+    path = _putzplan_path()
+    if wohnung is None or checkout_date is None or not os.path.exists(path):
+        return {"previous_date": None, "created_row": False, "next_guests": None}
+
+    backup_file(path)
+    wb = openpyxl.load_workbook(path)
+    ws = wb[PUTZPLAN_SHEET]
+
+    prev_row, prev_date = None, None
+    for row in range(2, ws.max_row + 1):
+        if ws.cell(row=row, column=COL_WOHNUNG).value != wohnung:
+            continue
+        if str(ws.cell(row=row, column=COL_CHECKIN_UHR).value or "").strip().lower() == "storniert":
+            continue
+        d = _parse_de_date(ws.cell(row=row, column=COL_DATUM).value)
+        if d is None or d >= checkout_date or (checkin_date is not None and d > checkin_date):
+            continue
+        if prev_date is None or d > prev_date:
+            prev_row, prev_date = row, d
+
+    old = {"adults": None, "children": None}
+    if prev_row is not None:
+        old = {"adults": ws.cell(row=prev_row, column=COL_ERWACHSENE).value,
+               "children": ws.cell(row=prev_row, column=COL_KINDER_U18).value}
+
+    # the new booking's own cleaning row
+    created = False
+    next_guests = None
+    own_row = _find_row_by_date(ws, wohnung, format_date_de(checkout_date))
+    if own_row is None:
+        nxt = _find_next_reservation(property_key, checkout_date, None)
+        if nxt is not None and nxt.get("adults") not in (None, ""):
+            next_guests = {"adults": nxt.get("adults"), "children": nxt.get("children") or 0}
+            same_day = _to_date(nxt.get("checkin")) == checkout_date
+        else:
+            next_guests = old if old["adults"] not in (None, "") else None  # carried over
+            same_day = False
+        row = _find_insert_row(ws, checkout_date)
+        ws.insert_rows(row)
+        ws.cell(row=row, column=COL_WOHNUNG, value=wohnung)
+        ws.cell(row=row, column=COL_DATUM, value=format_date_de(checkout_date))
+        ws.cell(row=row, column=COL_TAG, value=WEEKDAYS_DE[checkout_date.weekday()])
+        ws.cell(row=row, column=COL_WANN, value=PUTZPLAN_CLEANING_WINDOW)
+        ws.cell(row=row, column=COL_GLEICHER_TAG, value="Ja" if same_day else "Nein")
+        if next_guests:
+            ws.cell(row=row, column=COL_ERWACHSENE, value=next_guests["adults"])
+            ws.cell(row=row, column=COL_KINDER_U18, value=next_guests["children"] or 0)
+        created = True
+        if prev_row is not None and row <= prev_row:  # never happens (dates sort), but keep indices honest
+            prev_row += 1
+
+    # the previous cleaning's row now shows THIS booking
+    if prev_row is not None:
+        ws.cell(row=prev_row, column=COL_ERWACHSENE, value=adults)
+        ws.cell(row=prev_row, column=COL_KINDER_U18, value=children or 0)
+        if children_u3 in ("Ja", "Nein"):
+            ws.cell(row=prev_row, column=COL_KINDER_U3, value=children_u3)
+        if checkin_date is not None:
+            ws.cell(row=prev_row, column=COL_GLEICHER_TAG, value="Ja" if checkin_date == prev_date else "Nein")
+
+    save_workbook_atomic(wb, path)
+    log(f"    Putzplan: manual booking {wohnung} {format_date_de(checkout_date)}: previous row "
+        f"{prev_date and format_date_de(prev_date)} -> adults={adults}, children={children}; "
+        f"own row {'created' if created else 'already there'}, next guests {next_guests}")
+    return {"previous_date": prev_date, "created_row": created, "next_guests": next_guests}

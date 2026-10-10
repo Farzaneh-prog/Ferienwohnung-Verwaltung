@@ -211,14 +211,21 @@ def alerts_add():
     d = _parse_form_date(date_str)
     if property_key in PROPERTY_LABELS and d:
         add_alert(property_key, date_str, note)
-        guests = {}
         if request.form.get("adults", "").strip().isdigit():
-            guests = {"adults": int(request.form["adults"]),
-                      "children": int(request.form.get("children", "").strip() or 0),
-                      "children_u3": {"ja": "Ja", "nein": "Nein"}.get(request.form.get("children_u3", ""), None)}
+            # guests of THIS (not yet imported) booking -> Putzplan, like an import would
+            try:
+                result = putzplan_writer.register_manual_booking(
+                    property_key, d, int(request.form["adults"]), int(request.form.get("children", "").strip() or 0),
+                    {"ja": "Ja", "nein": "Nein"}.get(request.form.get("children_u3", "")),
+                    _parse_form_date(request.form.get("checkin")))
+                if result.get("previous_date"):
+                    flash(f"Putzplan: Gästezahl bei der Reinigung am {result['previous_date']:%d.%m.%Y} eingetragen"
+                          f"{' (Zeile für ' + d.strftime('%d.%m.%Y') + ' angelegt)' if result.get('created_row') else ''}.")
+            except Exception as exc:  # noqa: BLE001
+                flash(f"Gästezahl konnte nicht in den Putzplan geschrieben werden: {exc}")
         if scheduler.is_enabled():
             try:
-                cc.start_manual_search(property_key, d, dry_run=scheduler.is_dry_run(), guests=guests or None)
+                cc.start_manual_search(property_key, d, dry_run=scheduler.is_dry_run())
                 flash("Suche nach Putzkraft gestartet." if not scheduler.is_dry_run() else "Dry-Run: Suche würde starten.")
             except Exception as exc:  # noqa: BLE001
                 flash(f"Suche konnte nicht gestartet werden: {exc}")

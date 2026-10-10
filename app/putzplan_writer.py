@@ -501,27 +501,6 @@ def find_active_row(property_key, checkout_date):
         wb.close()
 
 
-def get_row_guests(property_key, checkout_date):
-    """{"adults", "children", "children_u3"} of the (non-storniert) row for this
-    property/date — the NEXT arrival's headcount (columns G/H/I), values may be
-    None — or None if there is no such row. Read-only."""
-    wohnung = PUTZPLAN_WOHNUNG_LABELS.get(property_key)
-    path = _putzplan_path()
-    if wohnung is None or checkout_date is None or not os.path.exists(path):
-        return None
-    wb = openpyxl.load_workbook(path, read_only=False, data_only=True)
-    try:
-        ws = wb[PUTZPLAN_SHEET]
-        row = _find_row_by_date(ws, wohnung, format_date_de(checkout_date))
-        if row is None:
-            return None
-        return {"adults": ws.cell(row=row, column=COL_ERWACHSENE).value,
-                "children": ws.cell(row=row, column=COL_KINDER_U18).value,
-                "children_u3": ws.cell(row=row, column=COL_KINDER_U3).value}
-    finally:
-        wb.close()
-
-
 def register_manual_booking(property_key, checkout_date, adults, children, children_u3=None, checkin_date=None,
                             log=print):
     """Dashboard "quick alert" for a booking that has NOT been imported yet

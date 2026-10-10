@@ -203,14 +203,7 @@ def incoming_whatsapp():
     if kind == "cancelled":
         return _twiml(f"Die Reinigung am {where} entfällt leider, die Reservierung wurde storniert.")
     if kind == "confirmed":
-        from .day_before import guests_text
-
-        guests = cc.guests_for_row(result["property_key"], result["checkout_date"])
-        extra = ""
-        if guests.get("adults") not in (None, ""):
-            who, under3 = guests_text(guests)
-            extra = f"\nNächste Gäste: {who}. {under3}"
-        return _twiml(f"Danke, ist bestätigt: {where}{extra}")
+        return _twiml(f"Danke, ist bestätigt: {where}")
     if kind == "still_confirmed":
         return _twiml(f"Du bist weiterhin bestätigt: {where}")
     if kind == "reserve":

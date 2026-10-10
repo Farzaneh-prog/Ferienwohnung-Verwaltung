@@ -52,9 +52,6 @@ TEMPLATE_SIDS = {
     "cancelled": os.environ.get("TWILIO_TEMPLATE_CANCELLED", "HX7b83ed2555eb8c5ac2b480b3126045a7"),
     "reminder_tomorrow": os.environ.get("TWILIO_TEMPLATE_REMINDER_TOMORROW", "HX9d7447ca4372c3ec648ede6e3dded71e"),
     "again": os.environ.get("TWILIO_TEMPLATE_AGAIN", "HXb5e8f2515c41bdd68e5a5b7347fd4f93"),
-    "request_guests": os.environ.get("TWILIO_TEMPLATE_REQUEST_GUESTS", "HXeb5e02f1420de73e3e83e981b8b7545f"),
-    "urgent_guests": os.environ.get("TWILIO_TEMPLATE_URGENT_GUESTS", "HX59f9c6451dcf72891cf38795eee6e50e"),
-    "reminder_open_guests": os.environ.get("TWILIO_TEMPLATE_REMINDER_OPEN_GUESTS", "HX9ec00bd264543913a7df79d430ac7840"),
     "owner_notice": os.environ.get("TWILIO_TEMPLATE_OWNER_NOTICE", "HX7d488d852c44b1e006c11553716158a4"),
 }
 
@@ -89,30 +86,6 @@ def send_cleaner_request(to_number: str, name: str, date_str: str, property_labe
         content_variables=json.dumps({"1": name, "2": date_str, "3": property_label}),
     )
     return message.sid
-
-
-_APPROVAL_CACHE = {}
-
-
-def template_approved(template: str) -> bool:
-    """True if WhatsApp has approved this template (checked via Twilio, cached
-    for 10 minutes). Lets a new template version go live by itself the moment
-    it is approved, with the old one used until then. Never raises."""
-    import time
-
-    sid = TEMPLATE_SIDS.get(template)
-    if not sid or sid == "PLACEHOLDER":
-        return False
-    cached = _APPROVAL_CACHE.get(sid)
-    if cached and time.time() - cached[0] < 600:
-        return cached[1]
-    try:
-        status = _get_client().content.v1.contents(sid).approval_fetch().fetch().whatsapp.get("status")
-        ok = status == "approved"
-    except Exception:  # noqa: BLE001
-        ok = False
-    _APPROVAL_CACHE[sid] = (time.time(), ok)
-    return ok
 
 
 def send_template(to_number: str, template: str, variables: dict) -> str:

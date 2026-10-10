@@ -24,9 +24,6 @@ from twilio.rest.content.v1.content.approval_create import ApprovalCreateList  #
 # friendly_name on the account -> SID (see tools/setup_whatsapp_templates.py)
 TEMPLATES = {
     "cleaner_coordination_request_quickreply_de": "HX8953397e888345beaba2f36eb5f150d9",
-    "putzplan_request_guests": "HXeb5e02f1420de73e3e83e981b8b7545f",
-    "putzplan_urgent_guests": "HX59f9c6451dcf72891cf38795eee6e50e",
-    "putzplan_reminder_open_guests": "HX9ec00bd264543913a7df79d430ac7840",
     "putzplan_reminder_open": "HX96afc7964e8d69ad98ed4718f59d190c",
     "putzplan_urgent_v2": "HX00f3a39268ae0fae30e4b5650faa168f",  # v1 was reclassified as MARKETING by Meta
     "putzplan_taken": "HX5abcf216022453b9e3c49c34c64e7294",

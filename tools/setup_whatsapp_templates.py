@@ -24,25 +24,9 @@ from twilio.rest import Client  # noqa: E402
 from twilio.rest.content.v1.content import ContentList  # noqa: E402
 
 BUTTONS = [("Ja", "ja"), ("Nein", "nein")]
-BUTTONS_REQUEST = [("Ja", "ja"), ("Nein", "nein"), ("Vielleicht", "vielleicht")]
 
 TEMPLATES = {
     # name: (body, variables, buttons)
-    "putzplan_request_guests": (
-        "Hallo {{1}}, am {{2}} wird eine Reinigung gebraucht ({{3}}). Nächste Gäste: {{4}}. {{5}} "
-        "Kannst du das übernehmen?",
-        {"1": "Name", "2": "01.01.2027", "3": "Karlstraße", "4": "2 Erwachsene, 2 Kinder unter 18",
-         "5": "Kinder unter 3 Jahren: keine Angabe."}, "request"),
-    "putzplan_urgent_guests": (
-        "Hallo {{1}}, für die Reinigung am {{2}} ({{3}}) ist noch niemand verfügbar. "
-        "Nächste Gäste: {{4}}. {{5}} Kannst du sie bitte übernehmen?",
-        {"1": "Name", "2": "01.01.2027", "3": "Karlstraße", "4": "2 Erwachsene, 2 Kinder unter 18",
-         "5": "Kinder unter 3 Jahren: keine Angabe."}, True),
-    "putzplan_reminder_open_guests": (
-        "Hallo {{1}}, für die Reinigung am {{2}} ({{3}}) haben wir noch niemanden gefunden. "
-        "Nächste Gäste: {{4}}. {{5}} Wenn du kannst, antworte bitte bald.",
-        {"1": "Name", "2": "01.01.2027", "3": "Karlstraße", "4": "2 Erwachsene, 2 Kinder unter 18",
-         "5": "Kinder unter 3 Jahren: keine Angabe."}, True),
     "putzplan_reminder_open": (
         "Hallo {{1}}, für die Reinigung am {{2}} ({{3}}) haben wir noch niemanden gefunden. "
         "Wenn du kannst, antworte bitte bald.",
@@ -93,8 +77,7 @@ def main():
         if only and name not in only:
             continue
         if with_buttons:
-            buttons = BUTTONS_REQUEST if with_buttons == "request" else BUTTONS
-            types = {"twilio/quick-reply": {"body": body, "actions": [{"title": t, "id": i} for t, i in buttons]}}
+            types = {"twilio/quick-reply": {"body": body, "actions": [{"title": t, "id": i} for t, i in BUTTONS]}}
         else:
             types = {"twilio/text": {"body": body}}
         req = ContentList.ContentCreateRequest({

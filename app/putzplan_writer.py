@@ -511,10 +511,11 @@ def register_manual_booking(property_key, checkout_date, adults, children, child
         booking's check-in / checkout) now describes THIS booking as its next
         guests: columns G/H(/I) = adults, children (under 18), under-3;
       - the row for `checkout_date` (the new booking's own cleaning) is created
-        if it doesn't exist, and gets the previous row's OLD numbers (G/H/I):
-        those guests used to be the "next guests" of the previous cleaning and
-        are now one cleaning later. Only if the previous row had no numbers is
-        the guest list consulted (the booking checking in after that date).
+        if it doesn't exist. GästeListe is the reference: its next guests are the
+        booking checking in after that date, read from the guest list. Only if
+        the guest list has no such booking are the previous row's OLD numbers
+        carried over (those guests used to be the previous cleaning's "next
+        guests" and are now one cleaning later).
 
     A later import of the booking finds the row and just refreshes it.
     Returns {"previous_date", "created_row", "next_guests"} (best effort)."""
@@ -552,10 +553,10 @@ def register_manual_booking(property_key, checkout_date, adults, children, child
     if own_row is None:
         nxt = _find_next_reservation(property_key, checkout_date, None)
         same_day = nxt is not None and _to_date(nxt.get("checkin")) == checkout_date
-        if old["adults"] not in (None, ""):
-            next_guests = dict(old)  # carried over from the previous row (the user's rule)
-        elif nxt is not None and nxt.get("adults") not in (None, ""):
+        if nxt is not None and nxt.get("adults") not in (None, ""):
             next_guests = {"adults": nxt.get("adults"), "children": nxt.get("children") or 0, "children_u3": None}
+        elif old["adults"] not in (None, ""):
+            next_guests = dict(old)  # no booking known after that date: carry the old numbers over
         else:
             next_guests = None
         row = _find_insert_row(ws, checkout_date)
@@ -588,3 +589,43 @@ def register_manual_booking(property_key, checkout_date, adults, children, child
         f"{prev_date and format_date_de(prev_date)} -> adults={adults}, children={children}; "
         f"own row {'created' if created else 'already there'}, next guests {next_guests}")
     return {"previous_date": prev_date, "created_row": created, "next_guests": next_guests}
+
+
+def reconcile_with_guest_list(from_date, apply=False, log=print):
+    """One-time (and repeatable) alignment of Putzplan columns F/G/H with
+    GästeListe, the reference: for every active row dated `from_date` or later,
+    next guests = the booking checking in soonest at/after the row's date
+    (adults, children under 18, same-day flag). Never touches column A (cleaner),
+    column I (under 3), or rows without a known next booking. Returns the list
+    of changes [(property, date, old, new)]; writes only when apply=True (backup
+    + atomic save)."""
+    label_to_property = {v: k for k, v in PUTZPLAN_WOHNUNG_LABELS.items()}
+    path = _putzplan_path()
+    wb = openpyxl.load_workbook(path)
+    ws = wb[PUTZPLAN_SHEET]
+    changes = []
+    for row in range(2, ws.max_row + 1):
+        property_key = label_to_property.get(ws.cell(row=row, column=COL_WOHNUNG).value)
+        d = _parse_de_date(ws.cell(row=row, column=COL_DATUM).value)
+        if (property_key is None or d is None or d < from_date
+                or str(ws.cell(row=row, column=COL_CHECKIN_UHR).value or "").strip().lower() == "storniert"):
+            continue
+        nxt = _find_next_reservation(property_key, d, None)
+        if nxt is None or nxt.get("adults") in (None, ""):
+            continue
+        new = (nxt.get("adults"), nxt.get("children") or 0,
+               "Ja" if _to_date(nxt.get("checkin")) == d else "Nein")
+        old = (ws.cell(row=row, column=COL_ERWACHSENE).value, ws.cell(row=row, column=COL_KINDER_U18).value,
+               ws.cell(row=row, column=COL_GLEICHER_TAG).value)
+        if old == new:
+            continue
+        changes.append((property_key, d, old, new))
+        if apply:
+            ws.cell(row=row, column=COL_ERWACHSENE, value=new[0])
+            ws.cell(row=row, column=COL_KINDER_U18, value=new[1])
+            ws.cell(row=row, column=COL_GLEICHER_TAG, value=new[2])
+    if apply and changes:
+        backup_file(path)
+        save_workbook_atomic(wb, path)
+        log(f"    Putzplan: {len(changes)} rows aligned with GästeListe (from {from_date})")
+    return changes

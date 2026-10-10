@@ -511,9 +511,10 @@ def register_manual_booking(property_key, checkout_date, adults, children, child
         booking's check-in / checkout) now describes THIS booking as its next
         guests: columns G/H(/I) = adults, children (under 18), under-3;
       - the row for `checkout_date` (the new booking's own cleaning) is created
-        if it doesn't exist, and its next guests are the booking that comes
-        AFTER it — taken from the guest list, else carried over from the
-        previous row's old numbers (those guests are now one cleaning later).
+        if it doesn't exist, and gets the previous row's OLD numbers (G/H/I):
+        those guests used to be the "next guests" of the previous cleaning and
+        are now one cleaning later. Only if the previous row had no numbers is
+        the guest list consulted (the booking checking in after that date).
 
     A later import of the booking finds the row and just refreshes it.
     Returns {"previous_date", "created_row", "next_guests"} (best effort)."""
@@ -538,10 +539,11 @@ def register_manual_booking(property_key, checkout_date, adults, children, child
         if prev_date is None or d > prev_date:
             prev_row, prev_date = row, d
 
-    old = {"adults": None, "children": None}
+    old = {"adults": None, "children": None, "children_u3": None}
     if prev_row is not None:
         old = {"adults": ws.cell(row=prev_row, column=COL_ERWACHSENE).value,
-               "children": ws.cell(row=prev_row, column=COL_KINDER_U18).value}
+               "children": ws.cell(row=prev_row, column=COL_KINDER_U18).value,
+               "children_u3": ws.cell(row=prev_row, column=COL_KINDER_U3).value}
 
     # the new booking's own cleaning row
     created = False
@@ -549,12 +551,13 @@ def register_manual_booking(property_key, checkout_date, adults, children, child
     own_row = _find_row_by_date(ws, wohnung, format_date_de(checkout_date))
     if own_row is None:
         nxt = _find_next_reservation(property_key, checkout_date, None)
-        if nxt is not None and nxt.get("adults") not in (None, ""):
-            next_guests = {"adults": nxt.get("adults"), "children": nxt.get("children") or 0}
-            same_day = _to_date(nxt.get("checkin")) == checkout_date
+        same_day = nxt is not None and _to_date(nxt.get("checkin")) == checkout_date
+        if old["adults"] not in (None, ""):
+            next_guests = dict(old)  # carried over from the previous row (the user's rule)
+        elif nxt is not None and nxt.get("adults") not in (None, ""):
+            next_guests = {"adults": nxt.get("adults"), "children": nxt.get("children") or 0, "children_u3": None}
         else:
-            next_guests = old if old["adults"] not in (None, "") else None  # carried over
-            same_day = False
+            next_guests = None
         row = _find_insert_row(ws, checkout_date)
         ws.insert_rows(row)
         ws.cell(row=row, column=COL_WOHNUNG, value=wohnung)
@@ -565,6 +568,8 @@ def register_manual_booking(property_key, checkout_date, adults, children, child
         if next_guests:
             ws.cell(row=row, column=COL_ERWACHSENE, value=next_guests["adults"])
             ws.cell(row=row, column=COL_KINDER_U18, value=next_guests["children"] or 0)
+            if next_guests.get("children_u3") not in (None, ""):
+                ws.cell(row=row, column=COL_KINDER_U3, value=next_guests["children_u3"])
         created = True
         if prev_row is not None and row <= prev_row:  # never happens (dates sort), but keep indices honest
             prev_row += 1

@@ -68,7 +68,7 @@ import os
 import threading
 
 from .config import DATA_DIR, PROPERTY_LABELS
-from .cleaner_roster import load_roster, sheet_label
+from .cleaner_roster import load_roster, match_cleaner, sheet_label
 from .tz import BERLIN
 from . import whatsapp_sender
 from .owner_alerts import notify_owner
@@ -135,6 +135,33 @@ def _is_eligible(cleaner_id: str, cleaner: dict, property_key: str, date: dateti
     return True
 
 
+_BUSY_CACHE = {}
+
+
+def _busy_cleaners(date: datetime.date, exclude_property: str, roster: dict) -> set:
+    """Cleaner ids who already have a (non-storniert) Putzplan assignment on
+    `date` at ANOTHER property (column A). Cached per Putzplan file version —
+    eligible_chain runs for every open row on every check."""
+    from . import putzplan_writer
+
+    try:
+        stamp = os.path.getmtime(putzplan_writer._putzplan_path())
+    except OSError:
+        return set()
+    key = (date, stamp)
+    if key not in _BUSY_CACHE:
+        if len(_BUSY_CACHE) > 200:
+            _BUSY_CACHE.clear()
+        _BUSY_CACHE[key] = list(putzplan_writer.iter_assigned_rows(date))
+    busy = set()
+    for property_key, code, _guests in _BUSY_CACHE[key]:
+        if property_key != exclude_property:
+            cid = match_cleaner(roster, code)
+            if cid:
+                busy.add(cid)
+    return busy
+
+
 def eligible_chain(property_key: str, date: datetime.date, roster: dict, state: dict) -> list:
     """Ordered list of cleaner_ids: eligible tier-1 person(s) first (fair
     rotation between Jennifer/Mehrnaz if both eligible), then tier 2, 3, 4
@@ -155,7 +182,13 @@ def eligible_chain(property_key: str, date: datetime.date, roster: dict, state: 
     def soft(cid):
         return any(datetime.date.fromisoformat(s) <= date <= datetime.date.fromisoformat(e)
                    for s, e in state.get("soft_weeks", {}).get(cid, []))
-    return [cid for cid in chain if not soft(cid)] + [cid for cid in chain if soft(cid)]
+
+    # Already booked that day at the OTHER property (agreed with Farzaneh
+    # 2026-10-10: one cleaner, one property per day): also moves to the END —
+    # still asked if nobody else is left (and in the <=3-day broadcast).
+    busy = _busy_cleaners(date, property_key, roster)
+    # stable sort: normal (0) -> soft free week (1) -> busy elsewhere (2) -> both (3)
+    return sorted(chain, key=lambda cid: (2 if cid in busy else 0) + (1 if soft(cid) else 0))
 
 
 def decide_next_action(property_key: str, checkout_date: datetime.date, roster: dict, state: dict,

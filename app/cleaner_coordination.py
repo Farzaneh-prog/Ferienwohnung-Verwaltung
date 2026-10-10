@@ -376,10 +376,29 @@ def remove_pre_assignment(property_key: str, checkout_date: datetime.date) -> No
         _save_state(state)
 
 
+def guests_for_row(property_key: str, checkout_date: datetime.date, state: dict = None) -> dict:
+    """Headcount of the guests who arrive AFTER this cleaning ("Nächste Gäste"):
+    the Putzplan row's G/H/I when it has one (set by the import), else what the
+    owner typed into the manual-search form ({} if unknown)."""
+    from . import putzplan_writer
+
+    try:
+        guests = putzplan_writer.get_row_guests(property_key, checkout_date)
+    except Exception:  # noqa: BLE001 — a locked/unreadable file must not stop a request
+        guests = None
+    if guests and guests.get("adults") not in (None, ""):
+        return guests
+    state = state if state is not None else _load_state()
+    return state["rows"].get(_state_key(property_key, checkout_date), {}).get("guests") or {}
+
+
 def start_manual_search(property_key: str, checkout_date: datetime.date, now: datetime.datetime = None,
-                        dry_run: bool = False, log=print) -> dict:
+                        dry_run: bool = False, log=print, guests: dict = None) -> dict:
     """Dashboard's "find a cleaner for this date" (Putz-Alerts page): starts
-    the chain right away even when the date is more than 10 days out."""
+    the chain right away even when the date is more than 10 days out. `guests`
+    = headcount of the guests arriving after this cleaning (adults, children,
+    children_u3), for when the booking isn't imported yet; the messages to the
+    cleaners show it."""
     now = now or datetime.datetime.now(tz=BERLIN)
     row_key = _state_key(property_key, checkout_date)
     if dry_run:
@@ -389,6 +408,8 @@ def start_manual_search(property_key: str, checkout_date: datetime.date, now: da
         state = _load_state()
         rs = _row_state(state, row_key)
         rs["manual_start"] = True
+        if guests and guests.get("adults") not in (None, ""):
+            rs["guests"] = guests
         if test_mode():
             rs["test"] = True  # test mode only processes flagged rows
         _save_state(state)
@@ -663,6 +684,18 @@ def _send_request(cleaner: dict, property_key: str, checkout_date: datetime.date
     Returns the Twilio message SID; raises on failure."""
     property_label = PROPERTY_LABELS.get(property_key, property_key)
     date_str = checkout_date.strftime("%d.%m.%Y")
+    # With a known headcount, use the "…_guests" variant of the template (adds
+    # "Nächste Gäste: …") — but only once WhatsApp has approved it; until then
+    # the plain version goes out.
+    variant = {None: "request_guests", "urgent": "urgent_guests", "reminder_open": "reminder_open_guests"}.get(template)
+    guests = guests_for_row(property_key, checkout_date) if variant else {}
+    if variant and guests.get("adults") not in (None, "") and whatsapp_sender.template_approved(variant):
+        from .day_before import guests_text
+
+        who, under3 = guests_text(guests)
+        return whatsapp_sender.send_template(
+            cleaner["whatsapp_number"], variant,
+            {"1": cleaner["name"], "2": date_str, "3": property_label, "4": who, "5": under3})
     if template is None:
         return whatsapp_sender.send_cleaner_request(cleaner["whatsapp_number"], cleaner["name"], date_str,
                                                     property_label)

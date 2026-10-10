@@ -211,9 +211,14 @@ def alerts_add():
     d = _parse_form_date(date_str)
     if property_key in PROPERTY_LABELS and d:
         add_alert(property_key, date_str, note)
+        guests = {}
+        if request.form.get("adults", "").strip().isdigit():
+            guests = {"adults": int(request.form["adults"]),
+                      "children": int(request.form.get("children", "").strip() or 0),
+                      "children_u3": {"ja": "Ja", "nein": "Nein"}.get(request.form.get("children_u3", ""), None)}
         if scheduler.is_enabled():
             try:
-                cc.start_manual_search(property_key, d, dry_run=scheduler.is_dry_run())
+                cc.start_manual_search(property_key, d, dry_run=scheduler.is_dry_run(), guests=guests or None)
                 flash("Suche nach Putzkraft gestartet." if not scheduler.is_dry_run() else "Dry-Run: Suche würde starten.")
             except Exception as exc:  # noqa: BLE001
                 flash(f"Suche konnte nicht gestartet werden: {exc}")

@@ -237,6 +237,8 @@ def run_evening_job(hour: int, now: datetime.datetime = None, log=print) -> None
             if dry_run:
                 log(f"    [day-before] {key}: Erinnerung an {roster[cid]['name']} — WÜRDE gesendet (dry-run)")
                 continue
+            if not guests or guests.get("adults") in (None, ""):
+                guests = rs.get("guests") or {}  # entered by hand in the manual search form
             who, under3 = guests_text(guests)
             if _send(roster[cid], "reminder_tomorrow", property_key, tomorrow, log, extra={"4": who, "5": under3}):
                 cc._row_state(state, key)["day_before_reminder"] = tomorrow.isoformat()

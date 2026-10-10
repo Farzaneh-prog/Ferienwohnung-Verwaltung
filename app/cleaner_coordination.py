@@ -215,6 +215,18 @@ def decide_next_action(property_key: str, checkout_date: datetime.date, roster: 
     attempts = row_state.get("attempts", [])
     tried_ids = [a["cleaner_id"] for a in attempts]
 
+    # Cleaners already booked that day at the OTHER property are asked only
+    # once everybody else has explicitly said Nein (decided with Farzaneh
+    # 2026-10-10) — silence or "Vielleicht" does not open the door for them,
+    # not in the sequential chain and not in the broadcast either.
+    busy = _busy_cleaners(checkout_date, property_key, roster)
+    if busy:
+        latest_all = {a["cleaner_id"]: a.get("response") for a in attempts}
+        out_all = set(row_state.get("withdrawn", []))
+        normal = [cid for cid in chain if cid not in busy]
+        if not all(latest_all.get(cid) == "nein" or cid in out_all for cid in normal):
+            chain = normal
+
     if days_until < 0:
         return {"action": "alert_owner", "reason": "checkout_passed_unresolved"}
 
@@ -240,15 +252,17 @@ def decide_next_action(property_key: str, checkout_date: datetime.date, roster: 
     if days_until <= BROADCAST_START_DAYS:
         if not chain:
             return {"action": "alert_owner", "reason": "no_eligible_cleaner"}
-        already_broadcast = any(a.get("stage") == "broadcast" for a in attempts)
-        if already_broadcast:
-            return {"action": "none", "reason": "broadcast_already_sent"}
+        asked_in_broadcast = {a["cleaner_id"] for a in attempts if a.get("stage") == "broadcast"}
+        declined = {a["cleaner_id"] for a in attempts if a.get("response") == "nein"}
+        # not yet asked in a broadcast and not declined — a second wave happens
+        # when the busy-elsewhere cleaners become eligible (all others said Nein)
+        targets = [cid for cid in chain if cid not in declined and cid not in asked_in_broadcast]
+        if not targets:
+            if asked_in_broadcast and not all(cid in declined for cid in chain):
+                return {"action": "none", "reason": "broadcast_already_sent"}
+            return {"action": "alert_owner", "reason": "everyone_declined"}
         if _in_quiet_hours(now):
             return {"action": "none", "reason": "quiet_hours"}
-        declined = {a["cleaner_id"] for a in attempts if a.get("response") == "nein"}
-        targets = [cid for cid in chain if cid not in declined]
-        if not targets:
-            return {"action": "alert_owner", "reason": "everyone_declined"}
         return {"action": "broadcast", "cleaner_ids": targets}
 
     untried = [cid for cid in chain if cid not in tried_ids]

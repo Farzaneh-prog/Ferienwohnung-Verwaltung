@@ -325,7 +325,7 @@ def append_putzplan_row(entry, log=print):
     revived_row = _find_row_by_date(ws, wohnung, format_date_de(checkout_date), storniert=True)
     if revived_row is not None:
         cleaner_code = ws.cell(row=revived_row, column=COL_WER).value
-        ws.cell(row=revived_row, column=COL_CHECKIN_UHR, value=None)
+        ws.cell(row=revived_row, column=COL_CHECKIN_UHR).value = None  # value=None in cell() is a no-op
         ws.cell(row=revived_row, column=COL_GLEICHER_TAG, value="Ja" if same_day else "Nein")
         if next_adults is not None:
             ws.cell(row=revived_row, column=COL_ERWACHSENE, value=next_adults)
@@ -462,7 +462,8 @@ def assign_cleaner(property_key, checkout_date, cleaner_code, log=print):
         log(f"    Putzplan: no matching row found to assign cleaner ({wohnung}, {target_date_str}) — skipped")
         return False
 
-    ws.cell(row=row, column=COL_WER, value=cleaner_code)
+    # NOT ws.cell(..., value=None): openpyxl ignores value=None there, so clearing never worked
+    ws.cell(row=row, column=COL_WER).value = cleaner_code
     save_workbook_atomic(wb, path)
     log(f"    Putzplan: {'cleared cleaner' if cleaner_code is None else 'assigned ' + cleaner_code} "
         f"in row {row} ({wohnung}, {target_date_str})")

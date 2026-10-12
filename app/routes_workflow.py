@@ -269,6 +269,34 @@ def assign_cleaner_form():
     return redirect(url_for("workflow.alerts_list"))
 
 
+@bp.route("/alerts/release", methods=["POST"])
+@login_required
+def release_cleaner_form():
+    """The cleaner entered in the Putzplan can't come after all: clear column A
+    and search again (without her)."""
+    property_key = request.form.get("property")
+    d = _parse_form_date(request.form.get("date"))
+    if property_key not in PROPERTY_LABELS or not d:
+        flash("Ungültige Eingabe.")
+    elif not scheduler.is_enabled():
+        flash("Scheduler ist aus — nichts geändert.")
+    elif scheduler.is_dry_run():
+        flash("Dry-run: nichts geändert.")
+    else:
+        try:
+            result = cc.release_by_owner(property_key, d)
+        except Exception as exc:  # noqa: BLE001
+            flash(f"Fehler: {exc}")
+        else:
+            if result == "nobody":
+                flash(f"Für {d:%d.%m.%Y} ist keine Putzkraft eingetragen — nichts geändert.")
+            elif result.startswith("promoted:"):
+                flash(f"Spalte A geleert. Reserve {result.split(':', 1)[1]} rückt nach und wurde informiert.")
+            else:
+                flash(f"Spalte A für {d:%d.%m.%Y} geleert; die Suche läuft neu (ohne die bisherige Putzkraft).")
+    return redirect(url_for("workflow.alerts_list"))
+
+
 @bp.route("/alerts/assign/delete", methods=["POST"])
 @login_required
 def assign_cleaner_delete():

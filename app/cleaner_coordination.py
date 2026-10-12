@@ -392,6 +392,55 @@ def assign_by_owner(property_key: str, checkout_date: datetime.date, cleaner_id:
     return "assigned"
 
 
+def release_by_owner(property_key: str, checkout_date: datetime.date, now: datetime.datetime = None,
+                     log=print) -> str:
+    """Dashboard "the current cleaner can't do it -> search again" (2026-10-12).
+    Same as the cleaner withdrawing herself (see apply_response), but triggered
+    by the owner, who has already talked to her: column A is cleared, she goes to
+    the row's "withdrawn" list (never asked again for this date), a reserve who
+    said Ja moves up, otherwise the row is reopened and everyone eligible is
+    asked again. Nobody is messaged about the withdrawal itself.
+    Returns "nobody" (no row / column A empty) | "promoted:<name>" | "reopened"."""
+    from . import putzplan_writer
+
+    now = now or datetime.datetime.now(tz=BERLIN)
+    roster = load_roster()
+    info = putzplan_writer.find_active_row(property_key, checkout_date)
+    if info is None or not info["cleaner"]:
+        return "nobody"
+    row_key = _state_key(property_key, checkout_date)
+    label = _label(property_key, checkout_date)
+    with STATE_LOCK:
+        state = _load_state()
+        row_state = _row_state(state, row_key)
+        old_id = row_state.get("confirmed_cleaner_id") or match_cleaner(roster, info["cleaner"])
+        old_name = roster[old_id]["name"] if old_id in roster else info["cleaner"]
+        row_state["confirmed_cleaner_id"] = None
+        row_state["reserves"] = [c for c in row_state.get("reserves", []) if c != old_id]
+        if old_id and old_id not in row_state.setdefault("withdrawn", []):
+            row_state["withdrawn"].append(old_id)
+        replacement = next((c for c in row_state["reserves"]
+                            if c in roster and any(a["cleaner_id"] == c and a.get("response") == "ja"
+                                                   for a in row_state.get("attempts", []))), None)
+        _save_state(state)
+    putzplan_writer.assign_cleaner(property_key, checkout_date, None, log=log)
+    if replacement:
+        notify_owner(f"{old_name} fällt aus → {label}; Reserve {roster[replacement]['name']} rückt nach", log=log)
+        confirm_cleaner(property_key, checkout_date, replacement, log=log, now=now,
+                        notify_others=False, promoted=True)
+        return f"promoted:{roster[replacement]['name']}"
+    with STATE_LOCK:
+        state = _load_state()
+        row_state = _row_state(state, row_key)
+        row_state["reopened"] = True
+        row_state["reminder_sent"] = False
+        row_state.pop("day_before_reminder", None)
+        _save_state(state)
+    notify_owner(f"{old_name} fällt aus → {label} — frage alle neu an", log=log)
+    advance_row(property_key, checkout_date, now=now, roster=roster, log=log)
+    return "reopened"
+
+
 def remove_pre_assignment(property_key: str, checkout_date: datetime.date) -> None:
     with STATE_LOCK:
         state = _load_state()

@@ -102,6 +102,27 @@
   </div>
 
   <div class="add-card">
+    <b>نفر فعلی نمی‌تواند — جستجوی جدید</b>
+    <form method="post" action="{{ url_for('workflow.release_cleaner_form') }}"
+          onsubmit="return confirm('ستون A خالی شود و جستجوی تازه شروع شود (بدون نفر فعلی)؟');">
+      <div>
+        <label>ملک</label>
+        <select name="property">
+          {% for key, label in property_labels.items() %}
+            <option value="{{ key }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label>تاریخ خروج (Abreise)</label>
+        <input type="date" name="date" required>
+      </div>
+      <div class="hint" style="color:#9fb0cf;font-size:0.8rem">اگر جایگزین را می‌دانید، به‌جای این دکمه از «مشخص‌کردن نظافتچی» استفاده کنید.</div>
+      <button type="submit">ستون A را خالی کن و دوباره جستجو کن</button>
+    </form>
+  </div>
+
+  <div class="add-card">
     <b>اعلام کنسلی</b>
     <form method="post" action="{{ url_for('workflow.cancellation_report') }}">
       <div>

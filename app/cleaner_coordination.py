@@ -331,10 +331,16 @@ def assign_by_owner(property_key: str, checkout_date: datetime.date, cleaner_id:
     """Dashboard "who does it" (owner decides before/instead of the search).
     - Putzplan row exists, column A empty -> written now, row confirmed, the
       search for it stops.
-    - Row exists and someone is already in column A -> nothing changes.
+    - Row exists and the SAME person is in column A -> nothing changes.
+    - Row exists and ANOTHER person is in column A -> replaced (2026-10-12: the
+      owner knows the cleaner can't come and who takes over): column A is
+      overwritten, the old one is put on the row's "withdrawn" list, the row
+      stays confirmed (now for the new one); the owner gets a notice. Nobody is
+      messaged — the owner has talked to both; the day-before reminder goes to
+      the new cleaner.
     - No row yet (booking not imported) -> remembered (pre_assign) and applied
       the moment the row appears.
-    Returns "assigned" | "already:<name>" | "pre_assigned"."""
+    Returns "assigned" | "replaced:<old name>" | "already:<name>" | "pre_assigned"."""
     from . import putzplan_writer
 
     roster = load_roster()
@@ -342,8 +348,25 @@ def assign_by_owner(property_key: str, checkout_date: datetime.date, cleaner_id:
     if info is None:
         pre_assign(property_key, checkout_date, cleaner_id)
         return "pre_assigned"
+    new_label = sheet_label(roster[cleaner_id])
     if info["cleaner"]:
-        return f"already:{info['cleaner']}"
+        if putzplan_writer.cleaner_matches(info["cleaner"], new_label):
+            return f"already:{info['cleaner']}"
+        old_name = info["cleaner"]
+        putzplan_writer.assign_cleaner(property_key, checkout_date, new_label, log=log)
+        with STATE_LOCK:
+            state = _load_state()
+            row_state = _row_state(state, _state_key(property_key, checkout_date))
+            old_id = row_state.get("confirmed_cleaner_id") or match_cleaner(roster, old_name)
+            if old_id and old_id != cleaner_id and old_id not in row_state.setdefault("withdrawn", []):
+                row_state["withdrawn"].append(old_id)
+            row_state["confirmed_cleaner_id"] = cleaner_id
+            row_state["reopened"] = False
+            row_state.pop("day_before_reminder", None)  # the new cleaner still gets the reminder
+            _save_state(state)
+        notify_owner(f"Von Hand ersetzt: {old_name} → {roster[cleaner_id]['name']} für "
+                     f"{_label(property_key, checkout_date)}", log=log)
+        return f"replaced:{old_name}"
     putzplan_writer.assign_cleaner(property_key, checkout_date, sheet_label(roster[cleaner_id]), log=log)
     with STATE_LOCK:
         state = _load_state()

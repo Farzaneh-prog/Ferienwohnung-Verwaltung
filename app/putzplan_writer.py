@@ -516,6 +516,12 @@ def iter_assigned_rows(checkout_date):
         wb.close()
 
 
+def cleaner_matches(cell_value, sheet_label_value) -> bool:
+    """Column A text and a roster 'sheet label' name the same person."""
+    norm = lambda s: str(s or "").strip().lower()  # noqa: E731
+    return norm(cell_value) == norm(sheet_label_value)
+
+
 def find_active_row(property_key, checkout_date):
     """None if there is no non-storniert Putzplan row for this property/date,
     else {"cleaner": <column A value or None>}. Read-only."""

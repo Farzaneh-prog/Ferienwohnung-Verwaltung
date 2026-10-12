@@ -259,8 +259,11 @@ def assign_cleaner_form():
         elif result == "pre_assigned":
             flash(f"Gespeichert: {name} für {d:%d.%m.%Y}. Sobald die Buchung importiert ist, wird sie eingetragen "
                   f"und es gibt keine Suche.")
+        elif result.startswith("replaced:"):
+            flash(f"Geändert: {result.split(':', 1)[1]} → {name} für {d:%d.%m.%Y} (Putzplan Spalte A). "
+                  f"Niemand wurde angeschrieben.")
         else:
-            flash(f"Dieser Tag hat schon eine Putzkraft im Putzplan ({result.split(':', 1)[1]}) — nichts geändert.")
+            flash(f"{result.split(':', 1)[1]} ist für {d:%d.%m.%Y} schon eingetragen — nichts geändert.")
     else:
         flash("Ungültige Eingabe.")
     return redirect(url_for("workflow.alerts_list"))

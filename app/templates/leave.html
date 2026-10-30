@@ -65,6 +65,22 @@
       </div>
     {% endif %}
   {% endfor %}
+  <h1 style="margin-top:2rem">روزهای هفته‌ای که هر نفر در دسترس است</h1>
+  <p class="hint">خارج از این روزها آن نفر هرگز برای نظافت پرسیده نمی‌شود (مثلاً فقط آخر هفته). برای یک بازه‌ی مشخص (مثلاً ۱۵ سپتامبر تا ۱۰ اکتبر) از فرم بالا استفاده کنید.</p>
+  {% for cid, c in roster.items() %}
+    <div class="card">
+      <form method="post" action="{{ url_for('workflow.leave_days') }}" style="display:flex;flex-wrap:wrap;gap:0.6rem;align-items:center">
+        <b style="min-width:7rem">{{ c.name }}</b>
+        <input type="hidden" name="cleaner" value="{{ cid }}">
+        {% for i, n in [(0,'Mo'),(1,'Di'),(2,'Mi'),(3,'Do'),(4,'Fr'),(5,'Sa'),(6,'So')] %}
+          <label style="display:flex;align-items:center;gap:0.25rem;color:#f5f4f0">
+            <input type="checkbox" name="days" value="{{ i }}" style="width:auto" {% if i in c.available_days %}checked{% endif %}> {{ n }}
+          </label>
+        {% endfor %}
+        <button type="submit">ذخیره</button>
+      </form>
+    </div>
+  {% endfor %}
   <p class="hint">مرخصی سخت: آن شخص اصلاً در زنجیره و broadcast نیست. هفته‌ی خالی: اولویتش پایین می‌آید ولی اگر کسی دیگر نبود از او استفاده می‌شود.</p>
 </body>
 </html>

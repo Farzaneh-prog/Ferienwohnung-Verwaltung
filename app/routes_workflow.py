@@ -18,7 +18,7 @@ from .import_parser import detect_and_parse, merge_reservation_entries
 from .quick_alerts import list_alerts, add_alert, resolve_alert
 from .xlsx_writer import process_batch, update_reservation_fields
 from . import cleaner_coordination as cc, day_before, putzplan_writer, scheduler, xlsx_writer
-from .cleaner_roster import load_roster
+from .cleaner_roster import load_roster, save_roster
 
 bp = Blueprint("workflow", __name__)
 
@@ -359,6 +359,26 @@ def leave_add():
             cc._save_state(state)
     else:
         flash("Ungültige Eingabe (Person oder Datum).")
+    return redirect(url_for("workflow.leave_list"))
+
+
+@bp.route("/leave/days", methods=["POST"])
+@login_required
+def leave_days():
+    """Weekdays a cleaner is generally available (roster 'available_days',
+    0 = Monday ... 6 = Sunday). Outside these days she is never asked."""
+    cid = request.form.get("cleaner")
+    roster = load_roster()
+    days = sorted({int(x) for x in request.form.getlist("days") if x.isdigit() and 0 <= int(x) <= 6})
+    if cid not in roster:
+        flash("Ungültige Eingabe.")
+    elif not days:
+        flash("Mindestens ein Wochentag muss angekreuzt sein — nichts geändert.")
+    else:
+        roster[cid]["available_days"] = days
+        save_roster(roster)
+        names = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"]
+        flash(f"{roster[cid]['name']}: verfügbar an {', '.join(names[i] for i in days)}.")
     return redirect(url_for("workflow.leave_list"))
 
 

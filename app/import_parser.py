@@ -84,8 +84,24 @@ _DE_MONTHS = {"januar": 1, "februar": 2, "märz": 3, "april": 4, "mai": 5, "juni
               "august": 8, "september": 9, "oktober": 10, "november": 11, "dezember": 12}
 
 
+_EN_SIMPLE = ["Property name", "Location", "Booker name", "Genius booker", "Arrival", "Departure", "Booked on",
+              "Status", "Total payment", "Commission", "Currency", "Reservation number"]
+_EN_DETAILED = ["Book number", "Booked by", "Guest name(s)", "Check-in", "Check-out", "Booked on", "Status", "Rooms",
+                "Persons", "Adults", "Children", "Children's age(s)", "Price", "Commission %", "Commission amount",
+                "Payment status", "Payment method (Payment Provider)", "Remarks", "Booker country", "Travel purpose",
+                "Device", "Unit type", "Duration (nights)", "Cancellation date", "Address", "Phone number"]
+
+
 def _is_german_export(header) -> bool:
     return "Unterkunftsname" in header or "Art der Wohneinheit" in header
+
+
+def _positional_layout(ncols):
+    """Safety net for an export in some OTHER language: Booking keeps the column
+    ORDER of the two exports across languages, so 12 columns = the simple
+    export, 26 = the detailed one. (The preview page still shows everything
+    before anything is written.)"""
+    return {12: ("booking_simple", _EN_SIMPLE), 26: ("booking_detailed", _EN_DETAILED)}.get(ncols)
 
 
 def _parse_booking_date(value) -> datetime.date:
@@ -93,6 +109,10 @@ def _parse_booking_date(value) -> datetime.date:
     s = str(value).strip()
     try:
         return datetime.datetime.strptime(s, "%d %B %Y").date()
+    except ValueError:
+        pass
+    try:
+        return datetime.date.fromisoformat(s[:10])
     except ValueError:
         pass
     day, month, year = s.replace(".", " ").split()
@@ -106,6 +126,9 @@ def _xlrd_rows(path):
     german = _is_german_export(header)
     if german:
         header = [_DE_HEADERS.get(h, h) for h in header]
+    elif not ({"Reservation number", "Book number"} & set(header)) and _positional_layout(len(header)):
+        header = list(_positional_layout(len(header))[1])
+        german = False
     for r in range(1, sheet.nrows):
         row = [sheet.cell_value(r, c) for c in range(sheet.ncols)]
         if not any(str(v).strip() for v in row):
@@ -351,6 +374,11 @@ def detect_and_parse(path, filename):
         if "Book number" in header:
             res, can = parse_booking_detailed(path)
             return res, can, "booking_detailed"
+        layout = _positional_layout(len(header))
+        if layout is not None:  # unknown language: go by column order, never block the import
+            parse = parse_booking_simple if layout[0] == "booking_simple" else parse_booking_detailed
+            res, can = parse(path)
+            return res, can, layout[0] + "_by_position"
         raise ValueError(f"Unrecognized .xls export format in {filename} (headers: {sorted(header)})")
     if lower.endswith(".csv"):
         with open(path, "rb") as f:

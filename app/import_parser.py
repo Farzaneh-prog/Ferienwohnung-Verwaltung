@@ -62,15 +62,60 @@ def _parse_money(value):
         return None
 
 
+# Booking.com started delivering the same two exports with GERMAN column titles
+# and German dates (seen 2026-11-04, the account language of the download
+# session decides). Translate the titles to the English ones the parsers use,
+# so one parser serves both. "Buchungsnummer" is the reservation number in both
+# exports, hence it gets both English names.
+_DE_HEADERS = {
+    "Unterkunftsname": "Property name", "Lage": "Location", "Name des Buchers": "Booker name",
+    "Genius-Bucher": "Genius booker", "Anreise": "Arrival", "Abreise": "Departure",
+    "Gebucht am": "Booked on", "Gesamtbetrag": "Total payment", "Kommission": "Commission",
+    "Währung": "Currency",
+    "Gebucht von": "Booked by", "Gästename(n)": "Guest name(s)", "Zimmer": "Rooms", "Personen": "Persons",
+    "Erwachsene": "Adults", "Kinder": "Children", "Alter der Kinder": "Children's age(s)", "Preis": "Price",
+    "Kommissionsbetrag": "Commission amount", "Zahlungsstatus": "Payment status",
+    "Zahlungsmethode (Zahlungsanbieter)": "Payment method (Payment Provider)",
+    "Bemerkungen": "Remarks", "Reisegrund": "Travel purpose", "Gerät": "Device",
+    "Art der Wohneinheit": "Unit type", "Aufenthaltsdauer (Nächte)": "Duration (nights)",
+    "Stornierungsdatum": "Cancellation date", "Adresse": "Address", "Telefonnummer": "Phone number",
+}
+_DE_MONTHS = {"januar": 1, "februar": 2, "märz": 3, "april": 4, "mai": 5, "juni": 6, "juli": 7,
+              "august": 8, "september": 9, "oktober": 10, "november": 11, "dezember": 12}
+
+
+def _is_german_export(header) -> bool:
+    return "Unterkunftsname" in header or "Art der Wohneinheit" in header
+
+
+def _parse_booking_date(value) -> datetime.date:
+    """'23 October 2026' (English export) or '23. Oktober 2026' (German export)."""
+    s = str(value).strip()
+    try:
+        return datetime.datetime.strptime(s, "%d %B %Y").date()
+    except ValueError:
+        pass
+    day, month, year = s.replace(".", " ").split()
+    return datetime.date(int(year), _DE_MONTHS[month.lower()], int(day))
+
+
 def _xlrd_rows(path):
     wb = xlrd.open_workbook(path)
     sheet = wb.sheets()[0]
     header = [str(sheet.cell_value(0, c)).strip() for c in range(sheet.ncols)]
+    german = _is_german_export(header)
+    if german:
+        header = [_DE_HEADERS.get(h, h) for h in header]
     for r in range(1, sheet.nrows):
         row = [sheet.cell_value(r, c) for c in range(sheet.ncols)]
         if not any(str(v).strip() for v in row):
             continue
-        yield dict(zip(header, row))
+        out = dict(zip(header, row))
+        if german and "Buchungsnummer" in out:
+            out["Reservation number"] = out["Book number"] = out["Buchungsnummer"]
+        if german and "Arrival" in out:  # the detailed export calls them Check-in / Check-out
+            out["Check-in"], out["Check-out"] = out["Arrival"], out["Departure"]
+        yield out
 
 
 def parse_booking_simple(path):
@@ -85,11 +130,11 @@ def parse_booking_simple(path):
         if not property_key or not code:
             continue
         status = str(row.get("Status", "")).strip().lower()
-        if "cancel" in status:
+        if "cancel" in status or "storn" in status:
             cancellations.append({"property": property_key, "confirmation_code": code})
             continue
-        arrival = datetime.datetime.strptime(row["Arrival"], "%d %B %Y").date()
-        departure = datetime.datetime.strptime(row["Departure"], "%d %B %Y").date()
+        arrival = _parse_booking_date(row["Arrival"])
+        departure = _parse_booking_date(row["Departure"])
         # "Booker name" deliberately ignored (Farzaneh's call — not the field
         # she trusts/uses; only "Guest name(s)" from the detailed Booking.com
         # export and "Gast" from Airbnb count as a real guest name source).
@@ -128,7 +173,7 @@ def parse_booking_detailed(path):
         if not property_key or not code:
             continue
         status = str(row.get("Status", "")).strip().lower()
-        cancelled = "cancel" in status or bool(str(row.get("Cancellation date", "")).strip())
+        cancelled = "cancel" in status or "storn" in status or bool(str(row.get("Cancellation date", "")).strip())
         if cancelled:
             cancellations.append({"property": property_key, "confirmation_code": code})
             continue
@@ -298,6 +343,8 @@ def detect_and_parse(path, filename):
     if lower.endswith(".xls"):
         wb = xlrd.open_workbook(path)
         header = set(str(wb.sheets()[0].cell_value(0, c)).strip() for c in range(wb.sheets()[0].ncols))
+        if _is_german_export(header):  # same two exports, German titles (2026-11-04)
+            header = {"Reservation number"} if "Unterkunftsname" in header else {"Book number"}
         if "Reservation number" in header:
             res, can = parse_booking_simple(path)
             return res, can, "booking_simple"
